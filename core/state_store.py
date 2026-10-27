@@ -88,5 +88,13 @@ class StateStore:
         val = cur.fetchone()[0]
         return float(val) if val else 0.0
 
+    def has_event(self, kind: str, detail_contains: str = "") -> bool:
+        """True when an event of this kind (optionally matching detail) exists."""
+        cur = self.db.execute(
+            "SELECT 1 FROM events WHERE kind=? AND detail LIKE ? LIMIT 1",
+            (kind, f"%{detail_contains}%"),
+        )
+        return cur.fetchone() is not None
+
     def close(self):
         self.db.close()

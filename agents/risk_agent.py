@@ -83,6 +83,10 @@ class RiskAgent:
                        open_positions: list) -> RiskGate:
         """Cheap filters that run even before consensus is computed."""
         r = self.cfg["risk"]
+        # a stale/crossed broker quote (ask=0, bid=0) must never pass the gate:
+        # the spread can even look negative and slip through a "> limit" check
+        if ctx.bid <= 0 or ctx.ask <= 0 or ctx.spread_points < 0 or ctx.ask < ctx.bid:
+            return RiskGate(False, f"invalid quote (bid {ctx.bid}, ask {ctx.ask})")
         spread_limit = float(r["max_spread_points"])
         if ctx.spread_points > spread_limit:
             return RiskGate(False, f"spread {ctx.spread_points:.0f} > {spread_limit:.0f} pts")

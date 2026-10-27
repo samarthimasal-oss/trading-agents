@@ -54,6 +54,9 @@
     "sample_count": 2,
     "min_move_atr": 0.25,
     "max_path_move_pct": 0.1,
+    "ensemble_runs": 3,
+    "min_agreement": 0.6,
+    "htf_confluence": 0.15,
     "timeframes": [
       "H1",
       "H4",
@@ -90,6 +93,10 @@
     "breakeven_atr": 1.0,
     "trailing_atr": 1.0,
     "trailing_step_atr": 0.25,
+    "partial_close_enabled": true,
+    "partial_close_at_r": 1.0,
+    "partial_close_pct": 50,
+    "time_stop_minutes": 0,
     "dead_market_atr_ratio": 0.62,
     "trading_hours_utc": [
       0,

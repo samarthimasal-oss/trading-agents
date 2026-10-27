@@ -11,6 +11,7 @@ import time
 from agents import quant
 from agents import kronos_agent
 from agents.llm_agent import LlmAgent
+from core import kronos_score
 from core.news_filter import NewsGuard
 from core.notifier import Notifier
 from agents.risk_agent import RiskAgent
@@ -21,6 +22,8 @@ from execution.executor import Executor
 from execution.guardian import Guardian
 
 log = logging.getLogger("runner")
+
+_KRONOS_TF_CACHE = os.path.join("state", "kronos_tf_cache.json")
 
 
 class TradingAgentRunner:
@@ -56,7 +59,12 @@ class TradingAgentRunner:
                                 "persistence": int(kx.get("persistence", 2))}
         self._kronos_exit_streak: dict[str, int] = {}
         self._kronos_tf_cache: dict[tuple, tuple] = {}   # (symbol, tf) -> (last_bar_ts, payload)
+        self._kronos_cache_dirty = False
+        self._load_kronos_tf_cache()                     # survive restarts (and keep grading history)
         self._board_state: dict[str, dict] = {}   # last rich board per symbol (persists Kronos forecast)
+        self.kronos_runs = max(1, int(self.kronos_cfg.get("ensemble_runs", 1) or 1))
+        self.kronos_min_agreement = float(self.kronos_cfg.get("min_agreement", 0.6) or 0.6)
+        self.htf_confluence = float(self.kronos_cfg.get("htf_confluence", 0.0) or 0.0)
 
         self.symbol: str | None = None
         self._last_bar_time: float = 0.0
@@ -83,6 +91,48 @@ class TradingAgentRunner:
 
     def stop(self):
         self.client.shutdown()
+
+    # ------------------------------------------- kronos forecast disk cache
+    def _load_kronos_tf_cache(self) -> None:
+        """Restore the last HTF forecast per (symbol, tf) from disk.
+
+        Without this, a runner restart would throw away the forecast that is
+        still current for the rest of the H1/H4/D1 bar — and we could no
+        longer grade it against the bar that eventually closes.
+        """
+        try:
+            with open(_KRONOS_TF_CACHE, "r", encoding="utf-8") as fh:
+                raw = json.load(fh)
+        except FileNotFoundError:
+            return
+        except Exception as exc:                     # noqa: BLE001
+            log.warning("kronos tf cache unreadable (ignored): %s", exc)
+            return
+        for key, item in (raw or {}).items():
+            try:
+                symbol, tf = key.split("|", 1)
+                last_ts, payload = item["last_ts"], item["payload"]
+                if isinstance(payload, dict):
+                    self._kronos_tf_cache[(symbol, tf)] = (int(last_ts), payload)
+            except Exception:                        # noqa: BLE001
+                continue
+        if self._kronos_tf_cache:
+            log.info("Restored %d cached Kronos forecasts from disk", len(self._kronos_tf_cache))
+
+    def _save_kronos_tf_cache(self) -> None:
+        if not self._kronos_cache_dirty:
+            return
+        try:
+            os.makedirs(os.path.dirname(_KRONOS_TF_CACHE) or ".", exist_ok=True)
+            raw = {f"{sym}|{tf}": {"last_ts": ts, "payload": payload}
+                   for (sym, tf), (ts, payload) in self._kronos_tf_cache.items()}
+            tmp = _KRONOS_TF_CACHE + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(raw, fh, default=str)
+            os.replace(tmp, _KRONOS_TF_CACHE)
+            self._kronos_cache_dirty = False
+        except Exception:                            # noqa: BLE001
+            log.warning("could not persist kronos tf cache", exc_info=True)
 
     # ------------------------------------------------------------------ cycle
     def cycle(self) -> dict:
@@ -141,8 +191,13 @@ class TradingAgentRunner:
             return {"error": str(exc)}
         df = quant.context_with_indicators(ctx, bars, a)
 
-        report = {"symbol": symbol, "price": ctx.bid, "atr": ctx.atr,
-                  "spread": round(ctx.spread_points, 1)}
+        # keep garbage broker quotes out of the dashboard board: a zero/crossed
+        # price or an absurd spread means "no usable feed", not "price 0.00002"
+        bad_quote = (ctx.bid <= 0 or not (0 <= ctx.spread_points <= 1000))
+        report = {"symbol": symbol,
+                  "price": None if bad_quote else ctx.bid,
+                  "atr": ctx.atr,
+                  "spread": None if bad_quote else round(ctx.spread_points, 1)}
 
         # ---- position maintenance (every poll)
         try:
@@ -166,11 +221,22 @@ class TradingAgentRunner:
             return report
         self._last_bar_time[symbol] = forming_bar_time
         report["new_bar"] = True
+        report["action"] = ""                         # clear stale per-bar labels
+        report["why"] = ""
 
         closed_df = df.iloc[:-1]                      # last CLOSED bar only
         if len(closed_df) < max(a["ema_slow"], a["rsi_period"], a["atr_period"]) + 5:
             report["why"] = "not enough bars"
             return report
+
+        # ---- grade the previous closed-bar forecast against this new bar
+        prev_fc = (self._board_state.get(symbol) or {}).get("forecast")
+        if prev_fc:
+            graded = self._grade_forecast(prev_fc, symbol, tf, closed_df)
+            if graded:
+                log.info("Kronos score %s %s: %s (%.2f%% realized)",
+                         symbol, tf, "HIT" if graded["hit"] else "MISS",
+                         graded["realized_pct"])
 
         # ---- volatility regime gate: dead market = no trades
         atr_now = float(closed_df["atr"].iloc[-1])
@@ -207,11 +273,43 @@ class TradingAgentRunner:
                          k_sig.confidence, payload.get("summary", k_sig.reason))
             signals.append(k_sig)
         consensus = quant.build_consensus(signals, a["consensus_threshold"])
+        # ---- higher-timeframe confluence: H1/H4 forecasts known at this very
+        # moment nudge the M15 consensus (§ htf_confluence). Support strengthens,
+        # opposition weakens; below the threshold the direction goes neutral.
         report["consensus"] = {
             "dir": consensus.direction, "strength": round(consensus.strength, 3),
             "confidence": consensus.confidence,
             "agents": {s.name: s.direction for s in consensus.signals},
         }
+        if self.htf_confluence > 0 and consensus.direction != 0:
+            votes = []
+            for tf_name, fc in (report.get("forecasts") or {}).items():
+                if str(tf_name).upper() == tf.upper() or not fc:
+                    continue
+                if fc.get("ood") or int(fc.get("dir") or 0) == 0:
+                    continue
+                if (int(fc.get("runs", 1) or 1) > 1
+                        and float(fc.get("agreement", 1.0)) < self.kronos_min_agreement):
+                    continue
+                votes.append(1 if int(fc["dir"]) == consensus.direction else -1)
+            if votes:
+                net = sum(votes) / len(votes)
+                before = consensus.strength
+                bias = self.htf_confluence * net * (1 if before >= 0 else -1)
+                new_strength = max(-1.0, min(1.0, before + bias))
+                new_dir = (1 if new_strength > 0 else -1) \
+                    if abs(new_strength) >= float(a["consensus_threshold"]) else 0
+                consensus.strength = new_strength
+                consensus.direction = new_dir
+                report["consensus"].update({
+                    "dir": new_dir, "strength": round(new_strength, 3),
+                    "htf": {"votes": len(votes), "net": round(net, 2),
+                            "applied": round(bias, 3),
+                            "before": round(before, 3)},
+                })
+                log.info("HTF confluence %s: %d votes net %+.0f → strength %.2f → %.2f%s",
+                         symbol, len(votes), net, before, new_strength,
+                         " (direction dropped)" if new_dir == 0 else "")
 
         positions = self.executor.bot_positions()
 
@@ -274,6 +372,7 @@ class TradingAgentRunner:
 
         if consensus.direction == 0:
             report["action"] = "flat"
+            report["why"] = f"no consensus (strength {consensus.strength:+.2f})"
             self._record(symbol, "none", plan=None, consensus=consensus,
                          review=None, reason="no consensus", executed=False)
             return report
@@ -331,11 +430,36 @@ class TradingAgentRunner:
         return report
 
     # ------------------------------------------------- multi-timeframe forecasts
+    def _grade_forecast(self, payload: dict, symbol: str, timeframe: str, df) -> dict | None:
+        """Grade a forecast once the bar *after* its base bar has closed."""
+        try:
+            if not payload or df is None or df.empty:
+                return None
+            base_ts = float(payload.get("base_ts") or 0.0)
+            ts = float(df.index[-1].timestamp())
+            if base_ts <= 0 or ts <= base_ts:
+                return None
+            if len(df.index) >= 2:
+                step = float((df.index[-1] - df.index[-2]).total_seconds())
+            else:
+                step = ts - base_ts
+            # must be exactly the next bar, otherwise the outcome is not recent
+            if not (0.5 * step <= (ts - base_ts) <= 1.5 * step):
+                return None
+            return kronos_score.grade(payload, symbol, timeframe,
+                                      float(df["close"].iloc[-1]), ts)
+        except Exception:                            # noqa: BLE001
+            log.warning("kronos grading failed for %s %s", symbol, timeframe,
+                        exc_info=True)
+            return None
+
     def _extra_forecasts(self, symbol: str) -> dict:
         """Kronos forecasts on the higher timeframes (H1/H4/D1 from config).
 
         Refreshed only when that timeframe's bar closes — a cheap per-poll
-        bar-time check plus a cached payload. Failsafe per timeframe.
+        bar-time check plus a cached payload. The forecast made from the
+        previous bar is graded against the bar that just closed. Failsafe
+        per timeframe, and the cache survives restarts on disk.
         """
         if not self.kronos_cfg.get("enabled", True):
             return {}
@@ -361,16 +485,28 @@ class TradingAgentRunner:
                 if cache and cache[0] == last_ts:
                     payload = cache[1]
                 else:
-                    payload = kronos_agent.forecast(df, self.kronos_cfg) or {}
+                    if cache and cache[1]:                     # new bar → score old call
+                        graded = self._grade_forecast(cache[1], symbol, tf, df)
+                        if graded:
+                            log.info("Kronos score %s %s: %s (%.2f%% realized)",
+                                     symbol, tf,
+                                     "HIT" if graded["hit"] else "MISS",
+                                     graded["realized_pct"])
+                    payload = kronos_agent.forecast(
+                        df, self.kronos_cfg, runs=self.kronos_runs) or {}
                     self._kronos_tf_cache[key] = (last_ts, payload)
+                    self._kronos_cache_dirty = True
                     if payload:
-                        log.info("Kronos %s %s: dir=%s | %s", symbol, tf,
-                                 payload.get("dir"), payload.get("summary", "")[:96])
+                        log.info("Kronos %s %s: dir=%s agree=%.2f | %s", symbol, tf,
+                                 payload.get("dir"), float(payload.get("agreement", 1)),
+                                 payload.get("summary", "")[:96])
                 if payload:
                     out[tf] = payload
             except Exception as exc:                           # noqa: BLE001
                 log.warning("kronos %s %s forecast failed (skipped): %s", symbol, tf, exc)
+        self._save_kronos_tf_cache()
         return out
+
 
     # ------------------------------------------------------------------ live board
     def _write_live(self, report: dict) -> None:
@@ -400,8 +536,11 @@ class TradingAgentRunner:
                     "why": rep.get("why", ""),
                     "kronos_dir": (rep.get("forecast") or {}).get("dir"),
                     "kronos_summary": (rep.get("forecast") or {}).get("summary"),
+                    "kronos_agreement": (rep.get("forecast") or {}).get("agreement"),
+                    "kronos_runs": (rep.get("forecast") or {}).get("runs"),
                     "forecast_candles": (rep.get("forecast") or {}).get("candles"),
                     "forecasts": rep.get("forecasts") or {},
+                    "htf": (rep.get("consensus") or {}).get("htf"),
                     "news": rep.get("news") or "",
                 }
             payload = {"ts": time.time(),

@@ -48,13 +48,18 @@ Dashboard highlights:
 - **LIVE / DRY-RUN / STOPPED** badge, MT5 connection state, auto-refresh
   countdown + wall-clock pills
 - **LIVE FEED ticker** — real broker events (fills, closes, SL moves,
-  rejects) streamed from the execution journal, with flash animation on
-  new events
-- Equity / balance / bigger today P&L / floating P&L cards
+  partial closes, rejects) streamed from the execution journal, with flash
+  animation on new events
+- Equity / balance / today P&L / floating P&L cards
 - **Risk guard gauges** — day-loss budget and peak-drawdown bars
 - **Market analysis chart** with timeframe tabs (M15/H1/H4/D1), EMA overlays,
   volume bars, and the **Kronos forecast path** drawn after the last candle
 - **Multi-timeframe outlook chips** per symbol (clickable → jumps the chart)
+- **Trade Plan card** — for every symbol, the next trade at a glance:
+  entry / stop / target / lots / risk $ / R:R / blockers, plus the H1–D1
+  confluence chips
+- **Kronos accuracy card** — live hit-rate dial, per-timeframe split,
+  recent graded calls, and "unanimous vs split ensemble" comparison
 - **Today's committee funnel** — filled / vetoed / risk-blocked / flat
 - Equity curve, strategy desk, decision journal, live log
 - Buttons: Start DRY-RUN, Start LIVE, Stop, Reset guardian
@@ -99,13 +104,26 @@ repo; model weights download automatically from Hugging Face on first use.
 - `risk.dead_market_atr_ratio` — if ATR goes dead vs that symbol's average
   range, entries are paused and the signal board shows the regime as `dead`.
 
-## 5. Multi-timeframe forecasts
+## 5. Multi-timeframe forecasts (Kronos v2)
 
 `kronos.timeframes` (default `["H1","H4","D1"]`) makes the runner forecast
-each additional timeframe **only when that timeframe's bar closes** — cached,
-cheap, and each carries its own horizon (H1 ≈ next 16 h, D1 ≈ next 16 days).
-The M15 forecast stays the execution-weighted one; higher timeframes feed
-the committee and the dashboard outlook strip.
+each additional timeframe **only when that timeframe's bar closes** — cached
+to disk (`state/kronos_tf_cache.json`) so restarts keep the current forecast
+and its grading history. The M15 forecast stays the execution-weighted one;
+higher timeframes feed the committee, the dashboard outlook strip, the trade
+plan chips, and a **±`htf_confluence` nudge** on the M15 consensus (support
+strengthens a signal, opposition weakens it, and a signal that falls back
+below `consensus_threshold` goes flat).
+
+- `ensemble_runs` — independent forecast passes per timeframe (default 3).
+  The median path is used; `agreement` is the share of runs that voted the
+  same direction. A split ensemble **abstains** below `min_agreement`
+  (default 0.6) and confidence is scaled by agreement.
+- **Accuracy scorecard** — every forecast is graded against the next closed
+  bar: direction hit, realized %, and average error. Results are stored in
+  `state/kronos_score.json` and shown on the dashboard (overall + per
+  timeframe + "unanimous vs split" form), so you can see whether Kronos is
+  earning its vote weight.
 
 ## 6. Test before going live (in this order)
 
@@ -127,14 +145,19 @@ Backtest tooling in `backtest/`: `backtest.py` (replay), `tune.py`
 ## 7. What it does on your account (per poll cycle)
 
 - Pulls current prices, spread, equity/margin.
-- Manages open positions: breakeven lock + ATR trailing stop; the Kronos
-  exit-watch closes positions early when the forecast is **against** the
-  position for `exit_watch.persistence` consecutive bars.
-- Once per closed bar: runs the quant agents + Kronos forecast, builds a
-  weighted consensus; on non-zero consensus the AI committee reviews, the
-  risk agent gates + sizes, and market orders go out with ATR-based SL/TP.
+- Manages open positions: **partial profit at 1R** (books 50% by default,
+  then forces the stop to breakeven), breakeven lock + ATR trailing stop,
+  an optional **time stop** (`risk.time_stop_minutes`, default off), and the
+  Kronos exit-watch which closes positions early when the forecast is
+  **against** the position for `exit_watch.persistence` consecutive bars.
+- Once per closed bar: runs the quant agents + Kronos ensemble forecast,
+  builds a weighted consensus (with H1/H4/D1 confluence), on non-zero
+  consensus the AI committee reviews, the risk agent gates + sizes, and
+  market orders go out with ATR-based SL/TP.
 - Every event is journaled to `state/agents.sqlite` (decisions, fills,
-  closes, SL modifications) and rendered on the dashboard.
+  closes, SL modifications, partial closes) and rendered on the dashboard.
+  Initial risk per ticket is persisted in `state/executor_state.json` so a
+  restart still knows where 1R is.
 
 ## 8. Risk knobs (defaults)
 
@@ -147,6 +170,9 @@ Backtest tooling in `backtest/`: `backtest.py` (replay), `tune.py`
 | `max_spread_points` | 40 | no entries during panic spreads |
 | `trading_hours_utc` | [0, 24] | session restriction |
 | `breakeven_atr` / `trailing_atr` | 1.0 / 1.0 | stop management |
+| `partial_close_enabled` | true | book profit at 1R |
+| `partial_close_at_r` / `partial_close_pct` | 1.0 / 50 | trigger and size of the partial |
+| `time_stop_minutes` | 0 (off) | close positions that never worked out |
 
 ## 9. Agents section (tuning)
 
