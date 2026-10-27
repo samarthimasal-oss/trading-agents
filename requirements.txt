@@ -1,0 +1,5 @@
+MetaTrader5>=5.0.4874
+pandas>=2.2.0
+numpy>=1.26.0
+requests>=2.31.0
+flask>=3.0.0

@@ -1,0 +1,23 @@
+# ---- secrets & local runtime config (never commit) ----
+config.json
+config.json.bak*
+
+# ---- runner state, journals, backtest artifacts ----
+state/
+*.sqlite
+*.sqlite3
+*.pkl
+
+# ---- logs ----
+*.log
+
+# ---- python ----
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# ---- OS / editor noise ----
+.DS_Store
+Thumbs.db

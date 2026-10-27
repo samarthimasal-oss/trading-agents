@@ -1,0 +1,112 @@
+{
+  "mt5": {
+    "terminal_path": "C:/Program Files/MetaTrader 5/terminal64.exe",
+    "login": 0,
+    "password": "",
+    "server": "MetaQuotes-Demo",
+    "timeout_ms": 60000,
+    "deviation_points": 20
+  },
+  "trading": {
+    "symbols": [
+      "EURUSD",
+      "GBPUSD",
+      "USDJPY",
+      "XAUUSD"
+    ],
+    "symbol": "EURUSD",
+    "timeframe": "M15",
+    "magic": 260101,
+    "bars_history": 300,
+    "poll_seconds": 15,
+    "close_on_opposite": true,
+    "require_llm_approval": false,
+    "comment": "TradingAgents"
+  },
+  "agents": {
+    "ema_fast": 12,
+    "ema_slow": 34,
+    "rsi_period": 14,
+    "rsi_overbought": 70,
+    "rsi_oversold": 30,
+    "atr_period": 14,
+    "atr_sl_mult": 1.5,
+    "atr_tp_mult": 3.0,
+    "weight_trend": 1.1,
+    "weight_momentum": 0.9,
+    "weight_reversion": 0.4,
+    "weight_breakout": 1.0,
+    "weight_pullback": 0.6,
+    "breakout_lookback": 24,
+    "weight_kronos": 1.1,
+    "consensus_threshold": 0.3
+  },
+  "kronos": {
+    "enabled": true,
+    "model": "NeoQuasar/Kronos-small",
+    "tokenizer": "NeoQuasar/Kronos-Tokenizer-base",
+    "device": "",
+    "max_context": 512,
+    "lookback": 384,
+    "pred_len": 16,
+    "T": 1.0,
+    "top_p": 0.9,
+    "sample_count": 2,
+    "min_move_atr": 0.25,
+    "max_path_move_pct": 0.1,
+    "timeframes": [
+      "H1",
+      "H4",
+      "D1"
+    ],
+    "exit_watch": {
+      "enabled": true,
+      "min_atr": 0.3,
+      "persistence": 2
+    }
+  },
+  "news": {
+    "enabled": true,
+    "window_before_min": 10,
+    "window_after_min": 10,
+    "min_impact": "High"
+  },
+  "telegram": {
+    "enabled": false,
+    "bot_token": "PASTE_BOTFATHER_TOKEN_HERE",
+    "chat_id": 0,
+    "token_file": "",
+    "max_len": 900
+  },
+  "risk": {
+    "risk_percent_per_trade": 0.5,
+    "fixed_lot": 0.0,
+    "max_notional_leverage_per_position": 2.5,
+    "max_positions": 2,
+    "max_open_same_symbol": 1,
+    "max_daily_loss_percent": 3.0,
+    "max_equity_drawdown_percent": 15.0,
+    "max_spread_points": 40,
+    "breakeven_atr": 1.0,
+    "trailing_atr": 1.0,
+    "trailing_step_atr": 0.25,
+    "dead_market_atr_ratio": 0.62,
+    "trading_hours_utc": [
+      0,
+      24
+    ],
+    "min_gap_seconds_between_same_symbol_trades": 300
+  },
+  "llm": {
+    "enabled": true,
+    "gemini_model": "gemini-3.5-flash",
+    "api_key": "PASTE_YOUR_GEMINI_API_KEY_HERE",
+    "api_key_file": "",
+    "min_seconds_between_reviews": 20,
+    "timeout_seconds": 40
+  },
+  "logging": {
+    "db_file": "state/agents.sqlite",
+    "log_file": "state/agents.log"
+  }
+}
