@@ -7,6 +7,7 @@ executor + guardian, all operating on your MT5 account.
 Usage:
   python main.py check                 # verify MT5 connectivity + config
   python main.py backtest             # replay history on your symbol
+  python main.py strategies --csv x   # five-engine research report
   python main.py run --dry-run        # live pipeline, no real orders
   python main.py run                  # LIVE trading on MT5 (careful!)
   python main.py status               # account + bot positions + journal
@@ -170,6 +171,82 @@ def cmd_backtest(cfg: dict, args) -> int:
     return 0
 
 
+def cmd_strategies(cfg: dict, args) -> int:
+    """Run the five-engine research replay and print per-strategy metrics."""
+    import pandas as pd
+
+    from market.data_engine import epoch_seconds
+    from strategies.registry import build_strategies
+    from strategies.replay import ReplayConfig, format_report, run_replay
+
+    if args.csv:
+        df = pd.read_csv(args.csv)
+        if "time" not in df.columns:
+            if df.index.name in ("time", "dt"):
+                df = df.reset_index()
+            else:
+                print("CSV requires a 'time' column (epoch seconds or datetime).")
+                return 2
+        if not pd.api.types.is_numeric_dtype(df["time"]):
+            df["time"] = epoch_seconds(df["time"])
+        else:
+            from market.data_engine import normalize_epoch
+
+            df["time"] = normalize_epoch(df["time"])
+        note = f"csv={args.csv} ({len(df)} bars)"
+    else:
+        from agents.quant import to_frame
+        from core.mt5_client import MT5Client
+
+        symbol = args.symbol or cfg["trading"]["symbol"]
+        client = MT5Client(cfg["mt5"])
+        client.connect()
+        try:
+            resolved = client.resolve_symbol(symbol)
+            raw = client.copy_bars(resolved, cfg["trading"]["timeframe"], int(args.bars))
+            df = to_frame(raw).reset_index()
+            df["time"] = epoch_seconds(df["time"])
+        finally:
+            client.shutdown()
+        note = f"MT5 {resolved} {cfg['trading']['timeframe']} ({len(df)} bars)"
+
+    overrides = {}
+    if args.csv:
+        overrides["symbol"] = args.symbol or "DEMO"
+    for key, value in (
+        ("point", args.point),
+        ("digits", args.digits),
+        ("spread_points", args.spread_points),
+        ("slippage_points", args.slippage_points),
+        ("warmup_bars", args.warmup),
+    ):
+        if value is not None:
+            overrides[key] = value
+
+    # A research CSV may not be the configured instrument.  Infer a sane
+    # scale for FX-like prices instead of charging gold-sized spreads on EURUSD.
+    median_close = float(pd.to_numeric(df["close"], errors="coerce").median())
+    if median_close < 10.0:
+        if "point" not in overrides:
+            overrides["point"] = 0.00001
+        if "digits" not in overrides:
+            overrides["digits"] = 5
+        if "spread_points" not in overrides:
+            overrides["spread_points"] = 1.5
+        if "slippage_points" not in overrides:
+            overrides["slippage_points"] = 0.2
+        note += " | FX-like scale inferred"
+
+    replay_cfg = ReplayConfig.from_config(cfg, **overrides)
+    engines = build_strategies(cfg)
+    if args.only:
+        engines = {args.only: engines[args.only]}
+    result = run_replay(df, cfg, replay=replay_cfg, strategies=engines,
+                        data_note=note)
+    print(format_report(result))
+    return 0
+
+
 def cmd_testorder(cfg: dict, args) -> int:
     """Fire ONE tiny market order then close it - proves the live trade path."""
     import logging as _lg
@@ -277,13 +354,22 @@ def cmd_status(cfg: dict) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="TradingAgents for MT5")
     parser.add_argument("command", choices=["check", "run", "backtest", "status",
-                                            "testorder"])
+                                            "testorder", "strategies"])
     parser.add_argument("--config", default=os.path.join(ROOT, "config.json"))
     parser.add_argument("--symbol", default=None)
     parser.add_argument("--bars", default=5000, type=int)
     parser.add_argument("--csv", default=None)
     parser.add_argument("--volume", default=None, type=float)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--only", default=None,
+                        choices=["trend", "breakout", "smc", "momentum",
+                                 "mean_reversion"],
+                        help="run a single strategy engine (default: all five)")
+    parser.add_argument("--point", default=None, type=float)
+    parser.add_argument("--digits", default=None, type=int)
+    parser.add_argument("--spread-points", default=None, type=float)
+    parser.add_argument("--slippage-points", default=None, type=float)
+    parser.add_argument("--warmup", default=None, type=int)
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO,
@@ -300,6 +386,8 @@ def main() -> int:
         return cmd_run(cfg, args.dry_run)
     if args.command == "backtest":
         return cmd_backtest(cfg, args)
+    if args.command == "strategies":
+        return cmd_strategies(cfg, args)
     if args.command == "testorder":
         return cmd_testorder(cfg, args)
     return cmd_status(cfg)

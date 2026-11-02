@@ -118,6 +118,43 @@
     "min_seconds_between_reviews": 20,
     "timeout_seconds": 40
   },
+  "strategies": {
+    "enabled": true,
+    "min_confidence": 0.45,
+    "max_signals_per_bar": 2,
+    "allow_opposite_directions": false,
+    "min_rr": 0.8,
+    "weights": {
+      "trend": 1.1,
+      "breakout": 1.0,
+      "smc": 1.15,
+      "momentum": 0.95,
+      "mean_reversion": 0.8
+    },
+    "engines": {
+      "trend": {
+        "enabled": true
+      },
+      "breakout": {
+        "enabled": true
+      },
+      "smc": {
+        "enabled": true
+      },
+      "momentum": {
+        "enabled": true
+      },
+      "mean_reversion": {
+        "enabled": true
+      }
+    },
+    "replay": {
+      "spread_points": 20.0,
+      "slippage_points": 2.0,
+      "warmup_bars": 210,
+      "max_open_positions": 1
+    }
+  },
   "logging": {
     "db_file": "state/agents.sqlite",
     "log_file": "state/agents.log"

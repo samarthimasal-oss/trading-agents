@@ -56,7 +56,9 @@ def load_csv(path: str) -> pd.DataFrame:
         if col not in df.columns:
             raise SystemExit(f"CSV missing column: {col}")
     if "time" in df.columns:
-        df["time"] = pd.to_datetime(df["time"]).astype("int64") // 10**9
+        from market.data_engine import normalize_epoch
+
+        df["time"] = normalize_epoch(df["time"])
         df = df.set_index("time")
     return df
 

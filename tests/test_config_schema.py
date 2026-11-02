@@ -69,3 +69,19 @@ def test_per_symbol_spread_map_accepts_numbers():
     cfg["risk"]["max_spread_points_by_symbol"] = {"XAUUSD": 80}
     validated = validate_config(cfg)
     assert validated["risk"]["max_spread_points_by_symbol"]["XAUUSD"] == 80
+
+
+def test_unknown_strategy_engine_is_rejected():
+    cfg = copy.deepcopy(_example())
+    cfg["strategies"]["engines"]["unknown"] = {"enabled": True}
+    with pytest.raises(ConfigError) as exc:
+        validate_config(cfg)
+    assert "unknown strategy" in str(exc.value)
+
+
+def test_strategy_confidence_must_be_a_probability():
+    cfg = copy.deepcopy(_example())
+    cfg["strategies"]["min_confidence"] = 2.0
+    with pytest.raises(ConfigError) as exc:
+        validate_config(cfg)
+    assert "min_confidence" in str(exc.value)

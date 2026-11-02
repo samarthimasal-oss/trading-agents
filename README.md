@@ -20,7 +20,14 @@ running anything:
 **Phase 1 is complete on branch `upgrade/phase-1-foundation`:** the backtest
 import collision is fixed, guardian lockouts survive restarts, sizing and
 stops use the last **closed** bar, quotes are quarantined per symbol, config
-is validated at startup, and the first 28-test `pytest` suite is green.
+is validated at startup, and the foundation `pytest` suite is green.
+
+**Phase 2 implementation is complete on branch `upgrade/phase-2-strategies`:** a closed-bar
+market-data engine, causal feature layer, market-structure detectors, five
+independent strategy engines, a deterministic arbiter, and a conservative
+research replay with per-strategy metrics. The engines are **research-only**:
+live execution still uses the legacy quant/Kronos path until the new engines
+pass out-of-sample validation. See section 6.
 
 ```
                        +-----------------------+
@@ -147,12 +154,64 @@ below `consensus_threshold` goes flat).
   timeframe + "unanimous vs split" form), so you can see whether Kronos is
   earning its vote weight.
 
-## 6. Test before going live (in this order)
+## 6. Five independent strategy engines (research)
+
+`market/` turns MT5 bars into a strictly closed-bar `BarSeries`, adds causal
+features (`ema20/50/200`, RSI, ATR, ADX, MACD, Bollinger, ROC, volume z-score,
+session, previous-day levels, VWAP), and detects structure (confirmed swings,
+BOS/CHoCH, liquidity sweeps, fair-value gaps, order blocks, premium/discount).
+`strategies/` contains five independent engines:
+
+| Engine | Idea | Default sessions |
+|---|---|---|
+| `trend` | EMA20/50/200 stack + ADX/ROC + pullback | London / overlap / NY |
+| `breakout` | Asia or London range break with compression + volume | London / overlap / NY |
+| `smc` | Liquidity sweep + displacement + FVG/order block in discount/premium | London / overlap / NY |
+| `momentum` | MACD/ROC acceleration with RSI in the healthy middle | London / overlap / NY |
+| `mean_reversion` | Quiet range + band extreme + turn, target the mid-band | London / overlap / NY |
+
+An engine returns a `StrategySignal` proposal, never an order.
+`strategies/arbiter.py` drops expired/low-confidence/low-R proposals, keeps
+one proposal per strategy, de-duplicates setup ids, blocks simultaneous
+long/short exposure unless configured otherwise, and caps proposals per bar
+with an explicit rejection reason.
+
+The replay harness is deliberately conservative:
 
 ```powershell
-python main.py backtest --csv demo_1min.csv --bars 500   # deterministic fixture replay
+python main.py strategies --csv demo_1min.csv          # all five engines
+python main.py strategies --csv demo_1min.csv --only trend
+python main.py strategies --bars 5000                  # live MT5 history
+```
+
+```text
+signal at close of bar i -> fill at open of bar i+1
+same bar touches stop and target -> stop is assumed first
+gap through stop -> fill at the gap open, not the stop
+costs -> configured spread + slippage on entry and exit
+```
+
+It reports trades, win rate, total/expectancy R, profit factor, max drawdown,
+sample Sharpe, MFE/MAE, exit reasons, and session/regime/month breakdowns.
+The default replay allows one concurrent position, which keeps the sample near
+the 2-3 trades/day design target instead of stacking correlated entries.
+`demo_1min.csv` is synthetic FX-like fixture data, **not** an edge claim. The
+CLI infers an FX-like point/digits/spread scale for it; override with
+`--point`, `--digits`, `--spread-points`, and `--slippage-points` for other
+instruments.
+
+Configuration lives in `strategies`: `enabled`, `min_confidence`,
+`max_signals_per_bar`, `allow_opposite_directions`, `min_rr`, `weights`,
+per-engine `engines.<name>` blocks, and a `replay` block. The engines are not
+yet wired into the live executor; `signal_mode=engines` is a later phase.
+
+## 7. Test before going live (in this order)
+
+```powershell
+python main.py backtest --csv demo_1min.csv --bars 500   # legacy quant replay
+python main.py strategies --csv demo_1min.csv           # five-engine research report
 python main.py run --dry-run               # full live pipeline, NO real orders
-python -m pytest -q                        # Phase 1 regression suite
+python -m pytest -q                        # 86-test regression suite
 ```
 
 Then:
@@ -167,7 +226,7 @@ Research tooling lives in `research/`: `backtest.py` (full replay engine),
 The top-level `backtest.py` remains the CLI facade. `demo_1min.csv` is a
 synthetic fixture for determinism tests, **not** a performance claim.
 
-## 7. What it does on your account (per poll cycle)
+## 8. What it does on your account (per poll cycle)
 
 - Pulls current prices, spread, equity/margin.
 - Manages open positions: **partial profit at 1R** (books 50% by default,
@@ -184,7 +243,7 @@ synthetic fixture for determinism tests, **not** a performance claim.
   Initial risk per ticket is persisted in `state/executor_state.json` so a
   restart still knows where 1R is.
 
-## 8. Risk knobs (defaults)
+## 9. Risk knobs (defaults)
 
 | Knob | Default | Meaning |
 |---|---|---|
@@ -200,7 +259,7 @@ synthetic fixture for determinism tests, **not** a performance claim.
 | `partial_close_at_r` / `partial_close_pct` | 1.0 / 50 | trigger and size of the partial |
 | `time_stop_minutes` | 0 (off) | close positions that never worked out |
 
-## 9. Agents section (tuning)
+## 10. Agents section (tuning)
 
 - `ema_fast/ema_slow` — trend crossover
 - `rsi_*` + roc thresholds — momentum
@@ -208,7 +267,7 @@ synthetic fixture for determinism tests, **not** a performance claim.
   (Kronos weigh-in included: `weight_kronos`)
 - `atr_sl_mult/atr_tp_mult` — stops in ATR multiples
 
-## 10. Disclaimers
+## 11. Disclaimers
 
 Trading CFDs/FX carries significant risk of loss. Bugs, broker differences,
 and market gaps can all produce outcomes different from the backtest — and

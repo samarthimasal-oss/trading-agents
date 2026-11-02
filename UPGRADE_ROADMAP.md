@@ -166,7 +166,7 @@ secrets, and record the baseline commit in the README.
 
 ---
 
-### Phase 1 — Foundation repair (next; must finish before Phase 2)
+### Phase 1 — Foundation repair (complete on `upgrade/phase-1-foundation`)
 
 **Objective:** make the existing system trustworthy and testable.
 
@@ -237,9 +237,14 @@ git status                                 # no secrets/state/backups
 
 ---
 
-### Phase 2 — Market data and five strategy engines
+### Phase 2 — Market data and five strategy engines (implementation complete on `upgrade/phase-2-strategies`)
 
 **Objective:** one data engine and five genuinely independent strategies.
+
+**Status:** the data engine, causal features, structure detectors, five engines, registry,
+arbiter, replay harness and tests are implemented. The replay runs on the synthetic fixture;
+a 30-day MT5 XAUUSD replay plus walk-forward/holdout validation remains the Phase 2 exit gate
+and must pass before any engine is wired into live execution.
 
 #### 2.1 Market data engine
 

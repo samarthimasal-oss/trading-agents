@@ -219,6 +219,55 @@ def validate_config(cfg: dict) -> dict:
     _string(errors, llm, "llm", "gemini_model", required=False)
     _number(errors, llm, "llm", "timeout_sec", lo=1, hi=120, required=False)
 
+    strategies = cfg.get("strategies")
+    if strategies is not None:
+        if not isinstance(strategies, dict):
+            errors.append("strategies: must be an object")
+        else:
+            _boolean(errors, strategies, "strategies", "enabled")
+            _number(errors, strategies, "strategies", "min_confidence", lo=0, hi=1,
+                    required=False)
+            _number(errors, strategies, "strategies", "min_rr", lo=0, hi=10,
+                    required=False)
+            _integer(errors, strategies, "strategies", "max_signals_per_bar",
+                     lo=1, hi=20, required=False)
+            _boolean(errors, strategies, "strategies", "allow_opposite_directions")
+            weights = strategies.get("weights")
+            if weights is not None and not isinstance(weights, dict):
+                errors.append("strategies.weights: must be an object")
+            elif isinstance(weights, dict):
+                for name, weight in weights.items():
+                    if not _num(weight) or float(weight) < 0 or float(weight) > 10:
+                        errors.append(
+                            f"strategies.weights.{name}: must be between 0 and 10")
+            engines = strategies.get("engines")
+            known = {"trend", "breakout", "smc", "momentum", "mean_reversion"}
+            if engines is not None and not isinstance(engines, dict):
+                errors.append("strategies.engines: must be an object")
+            elif isinstance(engines, dict):
+                for name, params in engines.items():
+                    if name not in known:
+                        errors.append(f"strategies.engines.{name}: unknown strategy")
+                        continue
+                    if not isinstance(params, dict):
+                        errors.append(f"strategies.engines.{name}: must be an object")
+                        continue
+                    _boolean(errors, params, f"strategies.engines.{name}", "enabled")
+            replay = strategies.get("replay")
+            if replay is not None:
+                if not isinstance(replay, dict):
+                    errors.append("strategies.replay: must be an object")
+                else:
+                    for key in ("spread_points", "slippage_points", "point"):
+                        _number(errors, replay, "strategies.replay", key,
+                                lo=0, hi=1_000_000, required=False)
+                    _integer(errors, replay, "strategies.replay", "digits",
+                             lo=0, hi=10, required=False)
+                    _integer(errors, replay, "strategies.replay", "warmup_bars",
+                             lo=1, hi=100000, required=False)
+                    _integer(errors, replay, "strategies.replay",
+                             "max_open_positions", lo=1, hi=100, required=False)
+
     logging_cfg = _section(cfg, "logging", errors)
     _string(errors, logging_cfg, "logging", "db_file")
     _string(errors, logging_cfg, "logging", "log_file")
