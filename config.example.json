@@ -9,12 +9,12 @@
   },
   "trading": {
     "symbols": [
+      "XAUUSD",
       "EURUSD",
       "GBPUSD",
-      "USDJPY",
-      "XAUUSD"
+      "USDJPY"
     ],
-    "symbol": "EURUSD",
+    "symbol": "XAUUSD",
     "timeframe": "M15",
     "magic": 260101,
     "bars_history": 300,
@@ -90,6 +90,12 @@
     "max_daily_loss_percent": 3.0,
     "max_equity_drawdown_percent": 15.0,
     "max_spread_points": 40,
+    "max_spread_points_by_symbol": {
+      "XAUUSD": 80,
+      "EURUSD": 20,
+      "GBPUSD": 20,
+      "USDJPY": 20
+    },
     "breakeven_atr": 1.0,
     "trailing_atr": 1.0,
     "trailing_step_atr": 0.25,

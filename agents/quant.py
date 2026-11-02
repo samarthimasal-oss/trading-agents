@@ -211,3 +211,21 @@ def context_with_indicators(ctx: MarketContext, bars: list[Candle],
     ctx.ema_fast, ctx.ema_slow = float(row["ema_fast"]), float(row["ema_slow"])
     ctx.rsi, ctx.atr = float(row["rsi"]), float(row["atr"])
     return df
+
+
+def apply_closed_indicators(ctx: MarketContext,
+                            closed_df: pd.DataFrame) -> MarketContext:
+    """Overwrite context indicators with the last **closed** bar.
+
+    ``context_with_indicators`` sees the full frame, including the forming
+    candle, which is fine for display but not for sizing or stops.  Call this
+    after slicing the last row off and before building a trade plan.
+    """
+    if closed_df is None or closed_df.empty:
+        return ctx
+    row = closed_df.iloc[-1]
+    ctx.ema_fast = float(row["ema_fast"])
+    ctx.ema_slow = float(row["ema_slow"])
+    ctx.rsi = float(row["rsi"])
+    ctx.atr = float(row["atr"])
+    return ctx

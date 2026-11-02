@@ -1,6 +1,9 @@
 # ---- secrets & local runtime config (never commit) ----
 config.json
 config.json.bak*
+.env
+.env.*
+backups/
 
 # ---- runner state, journals, backtest artifacts ----
 state/

@@ -19,6 +19,15 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE TABLE IF NOT EXISTS equity_log (
   ts REAL, equity REAL, balance REAL, margin REAL, floating REAL
 );
+CREATE TABLE IF NOT EXISTS guardian_state (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  day TEXT,
+  day_start_equity REAL,
+  halted_day TEXT,
+  halt_reason TEXT,
+  halted_at REAL,
+  updated REAL
+);
 CREATE INDEX IF NOT EXISTS idx_decisions_ts ON decisions(ts);
 """
 
@@ -95,6 +104,40 @@ class StateStore:
             (kind, f"%{detail_contains}%"),
         )
         return cur.fetchone() is not None
+
+    # ------------------------------------------------------------ guardian
+    def guardian_state(self) -> dict | None:
+        """Return the persisted guardian snapshot, or None on a fresh DB."""
+        cur = self.db.execute(
+            "SELECT day, day_start_equity, halted_day, halt_reason, halted_at, updated "
+            "FROM guardian_state WHERE id=1")
+        row = cur.fetchone()
+        if not row:
+            return None
+        return {
+            "day": row[0],
+            "day_start_equity": float(row[1]) if row[1] is not None else None,
+            "halted_day": row[2],
+            "halt_reason": row[3] or "",
+            "halted_at": float(row[4]) if row[4] is not None else None,
+            "updated": float(row[5]) if row[5] is not None else None,
+        }
+
+    def save_guardian_state(self, *, day: str, day_start_equity: float | None,
+                            halted_day: str | None, halt_reason: str = "",
+                            halted_at: float | None = None) -> None:
+        """Atomically upsert the singleton guardian row."""
+        self.db.execute(
+            "INSERT INTO guardian_state "
+            "(id, day, day_start_equity, halted_day, halt_reason, halted_at, updated) "
+            "VALUES (1, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET "
+            "day=excluded.day, day_start_equity=excluded.day_start_equity, "
+            "halted_day=excluded.halted_day, halt_reason=excluded.halt_reason, "
+            "halted_at=excluded.halted_at, updated=excluded.updated",
+            (day, day_start_equity, halted_day, halt_reason, halted_at, time.time()),
+        )
+        self.db.commit()
 
     def close(self):
         self.db.close()

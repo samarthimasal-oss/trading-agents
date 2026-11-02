@@ -6,6 +6,22 @@ paths, an AI committee (Gemini) reviews them, a risk agent sizes and filters
 them, an executor places and manages them, and a guardian watches over the
 whole account. A local web dashboard gives you the live picture.
 
+**Current focus: XAUUSD (gold), intraday.** XAUUSD is the default primary
+symbol; FX pairs remain available as secondary instruments. The project is
+being upgraded in phases toward five independent strategies, validated ML,
+an independent risk governor and a native MQL5 EA. Read the plan before
+running anything:
+
+- [`PROJECT_AUDIT.md`](PROJECT_AUDIT.md) — verified findings and P0/P1/P2 backlog
+- [`EXISTING_ARCHITECTURE.md`](EXISTING_ARCHITECTURE.md) — how the current system works
+- [`UPGRADE_ROADMAP.md`](UPGRADE_ROADMAP.md) — phased plan and acceptance tests
+- [`REPOSITORY_EVALUATION.md`](REPOSITORY_EVALUATION.md) — reference-repo reuse decisions and licenses
+
+**Phase 1 is complete on branch `upgrade/phase-1-foundation`:** the backtest
+import collision is fixed, guardian lockouts survive restarts, sizing and
+stops use the last **closed** bar, quotes are quarantined per symbol, config
+is validated at startup, and the first 28-test `pytest` suite is green.
+
 ```
                        +-----------------------+
   MT5 market data ---> |  Quant agents         |  trend / momentum / reversion
@@ -77,6 +93,12 @@ python main.py check
 The `vendors/Kronos` folder (NeoQuasar/Kronos, Apache-2.0) ships with the
 repo; model weights download automatically from Hugging Face on first use.
 
+At startup the config is validated against `core/config_schema.py`. A missing
+or out-of-range value stops the process with a readable list of every problem
+(exit code 2) instead of failing with a `KeyError` mid-cycle. Quotes are also
+checked before use: a zero, crossed, stale or too-wide feed is labelled
+`QUARANTINED` and cannot open new risk.
+
 ## 2. MetaTrader 5 terminal
 
 - Install **MetaTrader 5** (the desktop terminal) and log in.
@@ -128,8 +150,9 @@ below `consensus_threshold` goes flat).
 ## 6. Test before going live (in this order)
 
 ```powershell
-python main.py backtest --bars 5000        # replay history, R-multiple stats
+python main.py backtest --csv demo_1min.csv --bars 500   # deterministic fixture replay
 python main.py run --dry-run               # full live pipeline, NO real orders
+python -m pytest -q                        # Phase 1 regression suite
 ```
 
 Then:
@@ -139,8 +162,10 @@ python main.py run                         # live, MT5 terminal must be connecte
 python main.py status                      # account, positions, journal
 ```
 
-Backtest tooling in `backtest/`: `backtest.py` (replay), `tune.py`
-(weight grid search), `horizon_edges.py` (per-agent horizon sweeps).
+Research tooling lives in `research/`: `backtest.py` (full replay engine),
+`tune.py` (weight grid search), `horizon_edges.py` (per-agent horizon sweeps).
+The top-level `backtest.py` remains the CLI facade. `demo_1min.csv` is a
+synthetic fixture for determinism tests, **not** a performance claim.
 
 ## 7. What it does on your account (per poll cycle)
 
@@ -167,7 +192,8 @@ Backtest tooling in `backtest/`: `backtest.py` (replay), `tune.py`
 | `max_positions` / `max_open_same_symbol` | 2 / 1 | concurrency limits |
 | `max_daily_loss_percent` | 3.0 | day loss → flatten + rest of day |
 | `max_equity_drawdown_percent` | 15.0 | peak-to-now drop → flatten + lockout |
-| `max_spread_points` | 40 | no entries during panic spreads |
+| `max_spread_points` | 40 | global spread ceiling in MT5 points |
+| `max_spread_points_by_symbol` | XAUUSD 80, FX 20 | per-symbol override; XAUUSD is wider than FX |
 | `trading_hours_utc` | [0, 24] | session restriction |
 | `breakeven_atr` / `trailing_atr` | 1.0 / 1.0 | stop management |
 | `partial_close_enabled` | true | book profit at 1R |

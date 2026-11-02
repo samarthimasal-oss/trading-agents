@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 from core.models import MarketContext, AccountSnapshot, Consensus, LlmReview, TradePlan
 from core.mt5_client import MT5Client
+from core.quotes import spread_limit_for
 
 log = logging.getLogger("risk")
 
@@ -87,7 +88,7 @@ class RiskAgent:
         # the spread can even look negative and slip through a "> limit" check
         if ctx.bid <= 0 or ctx.ask <= 0 or ctx.spread_points < 0 or ctx.ask < ctx.bid:
             return RiskGate(False, f"invalid quote (bid {ctx.bid}, ask {ctx.ask})")
-        spread_limit = float(r["max_spread_points"])
+        spread_limit = spread_limit_for(ctx.symbol, r)
         if ctx.spread_points > spread_limit:
             return RiskGate(False, f"spread {ctx.spread_points:.0f} > {spread_limit:.0f} pts")
 
@@ -117,11 +118,16 @@ class RiskAgent:
     # ------------------------------------------------------------- final shaping
     def build_plan(self, ctx: MarketContext, df, agent_cfg: dict,
                    consensus: Consensus, review: LlmReview,
-                   account: AccountSnapshot) -> TradePlan:
-        """Compose the executable plan: entry, volume, SL, TP."""
+                   account: AccountSnapshot, atr: float | None = None) -> TradePlan:
+        """Compose the executable plan: entry, volume, SL, TP.
+
+        ``atr`` should be the last **closed** bar's ATR.  When supplied it is
+        authoritative; ``ctx.atr`` is only a fallback for callers that have
+        already enforced closed-bar semantics.
+        """
         symbol = ctx.symbol
         info = MT5Client.symbol_settings(self.client.prepare(symbol))
-        atr_val = ctx.atr or 0.0
+        atr_val = float(atr) if atr is not None else (ctx.atr or 0.0)
         if atr_val <= 0:
             return TradePlan(symbol, "none", reason="ATR unavailable")
 

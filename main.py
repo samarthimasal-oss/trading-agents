@@ -22,6 +22,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from core.state_store import StateStore  # noqa: E402
+from core.config_schema import ConfigError, validate_config  # noqa: E402
+from core.quotes import assess_quote, spread_limit_for  # noqa: E402
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
@@ -29,8 +31,12 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 def load_config(path: str) -> dict:
     with open(path, "r", encoding="utf-8") as fh:
         cfg = json.load(fh)
-    # allow env override: TRADING_AGENTS_CONFIG
-    # (config.json edits always apply)
+    try:
+        validate_config(cfg)
+    except ConfigError as exc:
+        print("CONFIGURATION ERROR", file=sys.stderr)
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(2) from exc
     return cfg
 
 
@@ -76,14 +82,27 @@ def cmd_check(cfg: dict) -> int:
                                           2: "real"}.get(raw.trade_mode, raw.trade_mode))
         syms = cfg["trading"].get("symbols") or [cfg["trading"]["symbol"]]
         resolved_names = []
+        quarantined = []
         for sym in syms:
             resolved = client.resolve_symbol(sym)
             info = client.prepare(resolved)
             t = client.tick(resolved)
-            spread_pts = (t.ask - t.bid) / max(info.point, 1e-9)
+            q = assess_quote(
+                t.bid, t.ask, info.point,
+                max_spread_points=spread_limit_for(sym, cfg["risk"]),
+            )
+            status = "OK" if q.valid else f"QUARANTINED ({q.reason})"
             print(f"      {sym} -> {resolved:12s} bid={t.bid} ask={t.ask} "
-                  f"spread={spread_pts:.1f}pts")
+                  f"spread={q.spread_points:.1f}pts  {status}")
             resolved_names.append(resolved)
+            if not q.valid:
+                quarantined.append(sym)
+        if quarantined:
+            print(f"[WARN] symbol(s) quarantined: {', '.join(quarantined)}")
+        primary = str(cfg["trading"].get("symbol") or syms[0])
+        if primary in quarantined:
+            print(f"[FAIL] primary symbol {primary} has no usable quote")
+            return 1
         print("[OK] symbol data feed")
     except Exception as exc:
         print(f"[3/4] account/symbol check FAILED: {exc}")

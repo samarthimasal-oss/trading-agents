@@ -28,6 +28,7 @@ from flask import Flask, Response, jsonify, request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from core.state_store import StateStore          # noqa: E402
+from core.quotes import assess_quote, spread_limit_for             # noqa: E402
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 CFG_PATH = os.path.join(ROOT, "config.json")
@@ -83,6 +84,18 @@ def get_account_snapshot() -> dict:
         cfg = load_cfg()
         magic = int(cfg["trading"]["magic"])
         poss = c.positions(magic=magic)
+        quotes = {}
+        for sym in cfg["trading"].get("symbols") or [cfg["trading"]["symbol"]]:
+            try:
+                resolved = c.resolve_symbol(sym)
+                info = c.prepare(resolved)
+                t = c.tick(resolved)
+                q = assess_quote(t.bid, t.ask, info.point,
+                                 max_spread_points=spread_limit_for(sym, cfg["risk"]))
+                quotes[sym] = {"resolved": resolved, "bid": t.bid, "ask": t.ask,
+                               **q.as_dict()}
+            except Exception as exc:              # one bad symbol must not blank the page
+                quotes[sym] = {"valid": False, "reason": str(exc)[:80]}
         return {
             "connected": True,
             "login": acc.login,
@@ -93,6 +106,7 @@ def get_account_snapshot() -> dict:
             "margin_level": round(acc.margin_level, 0),
             "floating": round(acc.profit, 2),
             "daily_pnl": round(c.daily_bot_profit(magic), 2),
+            "quotes": quotes,
             "positions": [
                 {"ticket": p.ticket,
                  "dir": "BUY" if p.type == 0 else "SELL",

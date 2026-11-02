@@ -17,6 +17,7 @@ from core.notifier import Notifier
 from agents.risk_agent import RiskAgent
 from core.models import AccountSnapshot
 from core.mt5_client import MT5Client, MT5Error
+from core.quotes import assess_quote, spread_limit_for
 from core.state_store import StateStore
 from execution.executor import Executor
 from execution.guardian import Guardian
@@ -193,11 +194,15 @@ class TradingAgentRunner:
 
         # keep garbage broker quotes out of the dashboard board: a zero/crossed
         # price or an absurd spread means "no usable feed", not "price 0.00002"
-        bad_quote = (ctx.bid <= 0 or not (0 <= ctx.spread_points <= 1000))
+        quote = assess_quote(
+            ctx.bid, ctx.ask, ctx.point,
+            max_spread_points=spread_limit_for(symbol, self.cfg["risk"]),
+        )
         report = {"symbol": symbol,
-                  "price": None if bad_quote else ctx.bid,
+                  "price": None if not quote.valid else ctx.bid,
                   "atr": ctx.atr,
-                  "spread": None if bad_quote else round(ctx.spread_points, 1)}
+                  "spread": None if not quote.valid else round(ctx.spread_points, 1),
+                  "quote": quote.as_dict()}
 
         # ---- position maintenance (every poll)
         try:
@@ -227,6 +232,22 @@ class TradingAgentRunner:
         closed_df = df.iloc[:-1]                      # last CLOSED bar only
         if len(closed_df) < max(a["ema_slow"], a["rsi_period"], a["atr_period"]) + 5:
             report["why"] = "not enough bars"
+            return report
+
+        # every indicator used for sizing/stops must come from the closed bar,
+        # not from the still-forming candle that context_with_indicators saw
+        quant.apply_closed_indicators(ctx, closed_df)
+        report["atr"] = ctx.atr
+
+        # a quarantined feed may still be managed (executor has its own quote
+        # guard) but it must never open new risk
+        if not quote.valid:
+            consensus = quant.build_consensus(
+                [quant.Signal("quote", 0, 0, 0.0, quote.reason)], 1.0)
+            report["action"] = "blocked"
+            report["why"] = f"quote quarantined: {quote.reason}"
+            self._record(symbol, "blocked", None, consensus, None,
+                         report["why"], False)
             return report
 
         # ---- grade the previous closed-bar forecast against this new bar
@@ -413,7 +434,8 @@ class TradingAgentRunner:
             return report
 
         # ---- risk sizing + execution
-        plan = self.risk.build_plan(ctx, closed_df, a, consensus, review, account)
+        plan = self.risk.build_plan(ctx, closed_df, a, consensus, review, account,
+                                    atr=atr_now)
         executed = False
         if plan.action in ("buy", "sell") and plan.volume > 0:
             if self.dry_run:

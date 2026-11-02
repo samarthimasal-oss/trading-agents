@@ -25,7 +25,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backtest import backtest as bt                            # noqa: E402
+from research import backtest as bt                            # noqa: E402
 
 ROOT = bt.ROOT
 STATE = bt.STATE
