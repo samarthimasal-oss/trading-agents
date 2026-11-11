@@ -38,12 +38,15 @@ attach:
 
 1. **Tools → Options → Expert Advisors**.
 2. Enable **Allow WebRequest for listed URL**.
-3. Add `http://127.0.0.1:8765`.
+3. Add `127.0.0.1` (host only, no scheme or port; this is the address passed to
+   `SocketConnect`). Some builds also accept `http://127.0.0.1:8765`.
 4. Click **OK**, restart the terminal, and verify the entry is still listed.
 
 The list is encrypted in `config/common.ini`; writing a plaintext URL into
-`WebRequestUrl` is ignored. Error **4014** means the address is not allowed;
-**5272** means the whitelist is active but nothing is listening.
+`WebRequestUrl` is ignored. In testing, a UI-added entry did not survive a
+terminal restart and the file was not rewritten, so verify after restarting.
+Error **4014** means the address is not allowed; **5272** means the whitelist
+is active but nothing is listening.
 
 ## 3. Authentication
 

@@ -243,12 +243,15 @@ Before the first attach, allow loopback sockets in the terminal:
 
 1. **Tools → Options → Expert Advisors**.
 2. Enable **Allow WebRequest for listed URL**.
-3. Add `http://127.0.0.1:8765` (the socket whitelist uses this list too).
-4. Click **OK**, restart MT5, and confirm the entry survived.
+3. Add `127.0.0.1` (host only, no scheme or port; this is the address passed to
+   `SocketConnect`). Some builds also accept `http://127.0.0.1:8765`.
+4. Click **OK**, restart MT5, and confirm the entry is still listed.
 
 MT5 stores the list encrypted in `common.ini`; hand-editing the file with a
-plaintext URL has no effect. `SocketConnect` fails with **4014** when the host is
-not allowed, and with **5272** when the whitelist is fine but the bridge is down.
+plaintext URL has no effect. In testing, a UI-added entry did not survive a
+terminal restart and `common.ini` was not rewritten, so always verify after a
+restart. `SocketConnect` fails with **4014** when the host is not allowed, and
+with **5272** when the whitelist is fine but the bridge is down.
 
 EA inputs of interest:
 
