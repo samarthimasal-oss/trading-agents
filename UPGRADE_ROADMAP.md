@@ -327,6 +327,27 @@ feature layer; they may not share a single consensus direction as their only out
 **Objective:** move order placement and position management into a deterministic EA that runs
 in the Strategy Tester without Python.
 
+**Status (2026-11-06):** implementation complete and compiled cleanly
+(`#property strict`, 0 errors / 0 warnings). The EA has native five-strategy
+signals, broker-side stops, risk sizing, partial/BE/trail/time exits, persisted
+idempotency keys, halt/resume, position snapshots, reconciliation, and
+CSV/JSON tester reports. The Python loopback bridge and protocol are implemented
+and covered by tests (`python main.py ea-token`, `python main.py ea-server`).
+
+Three Strategy Tester passes on XAUUSD M15 were completed (in-sample):
+202 trades over three months at -18.66R (PF 0.77), plus two one-month passes.
+The results are **negative**, so the EA remains PAPER/dry-run by default and no
+engine is promoted to live execution. Reports and caveats are archived in
+[`docs/reports/`](docs/reports/README.md).
+
+On 2026-11-06 the EA attached to the Python bridge on the demo account,
+authenticated, sent `hello`/heartbeats and completed two reconciliation passes
+with zero mismatches. Still open before this phase exits: a PAPER `dry_run`
+intent, EA-side duplicate rejection, a bridge-restart/reconnect cycle, and a
+clean terminal restart with the socket whitelist persisted; plus
+real-tick/variable-spread/commission data and the Phase 2 walk-forward/holdout
+gates.
+
 #### 3.1 EA responsibilities
 
 - Receive authenticated JSON intents over localhost (or a file/named-pipe fallback).

@@ -4,6 +4,8 @@ config.json.bak*
 .env
 .env.*
 backups/
+ea_token.txt
+token.txt
 
 # ---- runner state, journals, backtest artifacts ----
 state/

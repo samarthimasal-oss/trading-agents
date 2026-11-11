@@ -7,10 +7,12 @@ executor + guardian, all operating on your MT5 account.
 Usage:
   python main.py check                 # verify MT5 connectivity + config
   python main.py backtest             # replay history on your symbol
-  python main.py strategies --csv x   # five-engine research report
   python main.py run --dry-run        # live pipeline, no real orders
   python main.py run                  # LIVE trading on MT5 (careful!)
   python main.py status               # account + bot positions + journal
+  python main.py strategies --csv x   # five-engine research report
+  python main.py ea-token             # create shared EA token (loopback bridge)
+  python main.py ea-server            # listen for the native MQL5 EA
 """
 from __future__ import annotations
 
@@ -314,6 +316,146 @@ def cmd_testorder(cfg: dict, args) -> int:
         client.shutdown()
 
 
+def _ea_settings(cfg: dict) -> dict:
+    ea = cfg.get("ea") or {}
+    return {
+        "host": ea.get("host") or "127.0.0.1",
+        "port": int(ea.get("port") or 8765),
+        "token_file": ea.get("token_file") or "state/ea_token.txt",
+        "heartbeat_ms": int(ea.get("heartbeat_ms") or 1000),
+        "ack_timeout_seconds": float(ea.get("ack_timeout_seconds") or 10.0),
+        "disconnect_grace_seconds": float(
+            ea.get("disconnect_grace_seconds") or 30.0),
+    }
+
+
+def _restrict_token_permissions(path: str) -> None:
+    """Best-effort owner-only permissions for the shared token file."""
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+    if os.name != "nt":
+        return
+    user = os.environ.get("USERNAME", "")
+    domain = os.environ.get("USERDOMAIN", "")
+    if not user:
+        return
+    principal = f"{domain}\\{user}" if domain else user
+    try:
+        import subprocess
+        subprocess.run(
+            ["icacls", path, "/inheritance:r", "/grant:r", f"{principal}:F"],
+            check=False, capture_output=True, text=True, timeout=10)
+        # Never leave the token unreadable by the account that just created it.
+        with open(path, encoding="utf-8") as handle:
+            handle.read()
+    except (OSError, subprocess.SubprocessError):
+        try:
+            import subprocess
+            subprocess.run(["icacls", path, "/reset"],
+                           check=False, capture_output=True, text=True, timeout=10)
+            subprocess.run(
+                ["icacls", path, "/grant:r", f"{principal}:F"],
+                check=False, capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+
+def _mt5_common_files() -> str:
+    appdata = os.environ.get("APPDATA", "")
+    if not appdata:
+        return ""
+    return os.path.join(appdata, "MetaQuotes", "Terminal", "Common", "Files")
+
+
+def cmd_ea_token(cfg: dict, args) -> int:
+    """Create the shared Python/EA token and copy it to MT5 common files."""
+    from execution.ea_protocol import TOKEN_ENV, create_token
+
+    settings = _ea_settings(cfg)
+    token_file = args.token_file or settings["token_file"]
+    value, path = create_token(token_file, force=bool(args.force))
+    _restrict_token_permissions(path)
+    print(f"EA token: {os.path.abspath(path)}")
+
+    common = args.common_dir or _mt5_common_files()
+    if common and not args.no_mt5:
+        folder = os.path.join(common, "TradingAgents")
+        try:
+            os.makedirs(folder, exist_ok=True)
+            common_path = os.path.join(folder, "token.txt")
+            with open(common_path, "w", encoding="utf-8") as handle:
+                handle.write(value + "\n")
+            _restrict_token_permissions(common_path)
+            print(f"EA token copied to: {common_path}")
+        except OSError as exc:
+            print(f"WARNING: could not copy token to MT5 common files: {exc}",
+                  file=sys.stderr)
+
+    if os.environ.get(TOKEN_ENV, "").strip():
+        print(f"WARNING: {TOKEN_ENV} is set and takes precedence over the file",
+              file=sys.stderr)
+        if os.environ[TOKEN_ENV].strip() != value:
+            print("WARNING: the environment token differs from the file token",
+                  file=sys.stderr)
+    print("Set the EA input InpTokenFile to TradingAgents\\token.txt "
+          "(relative to the MQL5 common files folder).")
+    return 0
+
+
+def cmd_ea_server(cfg: dict, args) -> int:
+    """Run the loopback bridge that a native EA connects to."""
+    import time
+    from execution.ea_client import EAOrderBridge, EAError
+    from execution.ea_protocol import (
+        AuthenticationError, DEFAULT_HOST, DEFAULT_PORT, load_token)
+
+    settings = _ea_settings(cfg)
+    host = args.host or settings["host"]
+    port = args.port or settings["port"]
+    token_file = args.token_file or settings["token_file"]
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        print("EA bridge refuses non-loopback hosts without TLS", file=sys.stderr)
+        return 2
+    try:
+        token = load_token(token_file)
+    except AuthenticationError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    bridge = EAOrderBridge(
+        token,
+        host=host if host != "localhost" else DEFAULT_HOST,
+        port=port or DEFAULT_PORT,
+        ack_timeout=settings["ack_timeout_seconds"],
+    )
+    try:
+        bridge.start()
+    except OSError as exc:
+        print(f"EA bridge could not bind {host}:{port}: {exc}", file=sys.stderr)
+        return 2
+
+    print(f"EA bridge listening on {host}:{bridge.bound_port} "
+          f"(token file {os.path.abspath(token_file)})")
+    print("Attach TradingAgentsEA in MetaTrader 5; it is the TCP client.")
+    if not (cfg.get("ea") or {}).get("enabled", False):
+        print("NOTE: ea.enabled is false; this bridge is for supervised testing only.")
+    deadline = time.time() + float(args.seconds) if args.seconds else None
+    try:
+        while deadline is None or time.time() < deadline:
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        print("Stopping EA bridge (Ctrl+C).")
+    finally:
+        status = bridge.status()
+        bridge.stop()
+    print(f"EA bridge stopped: connected={status['connected']} "
+          f"authenticated={status['authenticated']} "
+          f"positions={status['positions']} pending={status['pending']}")
+    return 0
+
+
 def cmd_status(cfg: dict) -> int:
     from core.mt5_client import MT5Client
     store = StateStore(cfg["logging"]["db_file"])
@@ -354,7 +496,8 @@ def cmd_status(cfg: dict) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="TradingAgents for MT5")
     parser.add_argument("command", choices=["check", "run", "backtest", "status",
-                                            "testorder", "strategies"])
+                                            "testorder", "strategies",
+                                            "ea-token", "ea-server"])
     parser.add_argument("--config", default=os.path.join(ROOT, "config.json"))
     parser.add_argument("--symbol", default=None)
     parser.add_argument("--bars", default=5000, type=int)
@@ -370,6 +513,22 @@ def main() -> int:
     parser.add_argument("--spread-points", default=None, type=float)
     parser.add_argument("--slippage-points", default=None, type=float)
     parser.add_argument("--warmup", default=None, type=int)
+
+    # EA bridge / token options
+    parser.add_argument("--token-file", default=None,
+                        help="shared EA token file (default: state/ea_token.txt)")
+    parser.add_argument("--force", action="store_true",
+                        help="ea-token: replace an existing token")
+    parser.add_argument("--no-mt5", action="store_true",
+                        help="ea-token: do not copy into the MT5 common folder")
+    parser.add_argument("--common-dir", default=None,
+                        help="ea-token: override the MT5 Common\\Files folder")
+    parser.add_argument("--host", default=None,
+                        help="ea-server: bind host (loopback only)")
+    parser.add_argument("--port", default=None, type=int,
+                        help="ea-server: bind port (default 8765)")
+    parser.add_argument("--seconds", default=0.0, type=float,
+                        help="ea-server: stop after N seconds (0 = run until Ctrl+C)")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO,
@@ -390,6 +549,10 @@ def main() -> int:
         return cmd_strategies(cfg, args)
     if args.command == "testorder":
         return cmd_testorder(cfg, args)
+    if args.command == "ea-token":
+        return cmd_ea_token(cfg, args)
+    if args.command == "ea-server":
+        return cmd_ea_server(cfg, args)
     return cmd_status(cfg)
 
 

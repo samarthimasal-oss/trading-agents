@@ -85,3 +85,33 @@ def test_strategy_confidence_must_be_a_probability():
     with pytest.raises(ConfigError) as exc:
         validate_config(cfg)
     assert "min_confidence" in str(exc.value)
+
+
+def test_ea_section_accepts_loopback_defaults():
+    cfg = validate_config(copy.deepcopy(_example()))
+    assert cfg["ea"]["host"] in {"127.0.0.1", "localhost", "::1"}
+    assert cfg["ea"]["port"] == 8765
+
+
+def test_ea_rejects_non_loopback_host():
+    cfg = copy.deepcopy(_example())
+    cfg["ea"]["host"] = "0.0.0.0"
+    with pytest.raises(ConfigError) as exc:
+        validate_config(cfg)
+    assert "loopback" in str(exc.value)
+
+
+def test_ea_rejects_invalid_port():
+    cfg = copy.deepcopy(_example())
+    cfg["ea"]["port"] = 70000
+    with pytest.raises(ConfigError) as exc:
+        validate_config(cfg)
+    assert "ea.port" in str(exc.value)
+
+
+def test_llm_timeout_seconds_is_validated():
+    cfg = copy.deepcopy(_example())
+    cfg["llm"]["timeout_seconds"] = 0
+    with pytest.raises(ConfigError) as exc:
+        validate_config(cfg)
+    assert "timeout_seconds" in str(exc.value)

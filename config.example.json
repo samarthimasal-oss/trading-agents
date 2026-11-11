@@ -155,6 +155,16 @@
       "max_open_positions": 1
     }
   },
+  "ea": {
+    "enabled": false,
+    "host": "127.0.0.1",
+    "port": 8765,
+    "token_file": "state/ea_token.txt",
+    "heartbeat_ms": 1000,
+    "ack_timeout_seconds": 10,
+    "disconnect_grace_seconds": 30,
+    "allow_live": false
+  },
   "logging": {
     "db_file": "state/agents.sqlite",
     "log_file": "state/agents.log"

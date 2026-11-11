@@ -29,6 +29,16 @@ research replay with per-strategy metrics. The engines are **research-only**:
 live execution still uses the legacy quant/Kronos path until the new engines
 pass out-of-sample validation. See section 6.
 
+**Phase 3 native EA implementation is complete on the same branch:** an MQL5
+Expert Advisor with native five-strategy signals, broker-side SL/TP, risk
+sizing, partial/breakeven/trailing/time exits, idempotent intents, halt/resume,
+reconciliation and Strategy Tester reports. It compiles with zero errors and
+zero warnings and runs in the tester without Python. Three in-sample tester
+passes lost money (**-18.66R** over three months, PF 0.77), so the EA stays
+PAPER/dry-run by default and is not authorised for live trading. Reports:
+[`docs/reports/`](docs/reports/README.md). Protocol:
+[`docs/PROTOCOL.md`](docs/PROTOCOL.md). See section 7.
+
 ```
                        +-----------------------+
   MT5 market data ---> |  Quant agents         |  trend / momentum / reversion
@@ -205,13 +215,89 @@ Configuration lives in `strategies`: `enabled`, `min_confidence`,
 per-engine `engines.<name>` blocks, and a `replay` block. The engines are not
 yet wired into the live executor; `signal_mode=engines` is a later phase.
 
-## 7. Test before going live (in this order)
+## 7. Native MQL5 EA (PAPER by default)
+
+`mql5/` contains the Expert Advisor and its modules:
+
+```text
+mql5/Experts/TradingAgents/TradingAgentsEA.mq5   entry point
+mql5/Include/TradingAgents/*.mqh                 JSON, protocol, socket,
+                                                 features, signals, risk,
+                                                 state, trade manager, report
+```
+
+Install (Windows, MT5 installed):
+
+```powershell
+# copy/compile into the MT5 data folder (default: auto-detect)
+powershell -ExecutionPolicy Bypass -File scripts\install_ea.ps1 -Compile
+
+# create the loopback token; also writes the MT5 common-files copy
+python main.py ea-token
+
+# start the Python bridge, then attach TradingAgentsEA to XAUUSD M15
+python main.py ea-server
+```
+
+Before the first attach, allow loopback sockets in the terminal:
+
+1. **Tools → Options → Expert Advisors**.
+2. Enable **Allow WebRequest for listed URL**.
+3. Add `http://127.0.0.1:8765` (the socket whitelist uses this list too).
+4. Click **OK**, restart MT5, and confirm the entry survived.
+
+MT5 stores the list encrypted in `common.ini`; hand-editing the file with a
+plaintext URL has no effect. `SocketConnect` fails with **4014** when the host is
+not allowed, and with **5272** when the whitelist is fine but the bridge is down.
+
+EA inputs of interest:
+
+| Input | Default | Meaning |
+|---|---|---|
+| `InpMode` | `PAPER` | `PAPER` validates intents and sends nothing; `LIVE` needs a fresh Python heartbeat; `TESTER` uses native signals only |
+| `InpUseNativeSignals` | `true` | native five-strategy engine on closed bars |
+| `InpNativeInLive` | `false` | require explicit opt-in before native entries in LIVE |
+| `InpRiskPercent` | `0.50` | risk per trade (% equity) |
+| `InpMaxTotalLots` | `0.30` | exposure cap; valid orders are reduced, not rejected |
+| `InpMaxSpreadPoints` | `80` | XAUUSD spread cap |
+| `InpTokenFile` | `TradingAgents\token.txt` | token relative to MT5 common files |
+| `InpDisconnectGraceSec` | `30` | block new entries after Python goes stale |
+
+Safety model:
+
+- Python sends authenticated, newline-delimited JSON intents with an
+  idempotency key; the EA re-validates symbol, price, stops, spread, session,
+  margin, volume and exposure before any order.
+- The EA persists seen keys, position state and daily equity, so a restart does
+  not duplicate a trade. A timed-out intent becomes `UNKNOWN` and must be
+  reconciled, never retried blindly.
+- `PAPER` returns `dry_run` acks. `LIVE` requires `InpMode=LIVE` plus a live
+  heartbeat. If Python disappears, existing positions keep their broker-side
+  SL/TP and management rules; new entries stop after the grace period.
+- No martingale, grid or uncontrolled averaging exists in the EA.
+- Sockets are unavailable in the Strategy Tester, so `TESTER` mode never waits
+  for Python.
+
+Honest tester evidence: three in-sample XAUUSD M15 passes lost money
+(202 trades, -18.66R, PF 0.77 over 2026-08-01 → 2026-11-01; 65 trades,
+-14.33R on the one-month check). The EA is therefore **not** promoted to live
+execution. Full reports, caveats and the sizing bug found during the pass are in
+[`docs/reports/README.md`](docs/reports/README.md).
+
+## 8. Test before going live (in this order)
 
 ```powershell
 python main.py backtest --csv demo_1min.csv --bars 500   # legacy quant replay
 python main.py strategies --csv demo_1min.csv           # five-engine research report
 python main.py run --dry-run               # full live pipeline, NO real orders
-python -m pytest -q                        # 86-test regression suite
+python -m pytest -q                        # 110-test regression suite
+```
+
+For the native EA, also verify the bridge before attaching it:
+
+```powershell
+python main.py ea-token
+python main.py ea-server --seconds 30      # expect a clean bind/stop, no token error
 ```
 
 Then:
@@ -226,7 +312,7 @@ Research tooling lives in `research/`: `backtest.py` (full replay engine),
 The top-level `backtest.py` remains the CLI facade. `demo_1min.csv` is a
 synthetic fixture for determinism tests, **not** a performance claim.
 
-## 8. What it does on your account (per poll cycle)
+## 9. What it does on your account (per poll cycle)
 
 - Pulls current prices, spread, equity/margin.
 - Manages open positions: **partial profit at 1R** (books 50% by default,
@@ -243,7 +329,7 @@ synthetic fixture for determinism tests, **not** a performance claim.
   Initial risk per ticket is persisted in `state/executor_state.json` so a
   restart still knows where 1R is.
 
-## 9. Risk knobs (defaults)
+## 10. Risk knobs (defaults)
 
 | Knob | Default | Meaning |
 |---|---|---|
@@ -259,7 +345,7 @@ synthetic fixture for determinism tests, **not** a performance claim.
 | `partial_close_at_r` / `partial_close_pct` | 1.0 / 50 | trigger and size of the partial |
 | `time_stop_minutes` | 0 (off) | close positions that never worked out |
 
-## 10. Agents section (tuning)
+## 11. Agents section (tuning)
 
 - `ema_fast/ema_slow` — trend crossover
 - `rsi_*` + roc thresholds — momentum
@@ -267,7 +353,7 @@ synthetic fixture for determinism tests, **not** a performance claim.
   (Kronos weigh-in included: `weight_kronos`)
 - `atr_sl_mult/atr_tp_mult` — stops in ATR multiples
 
-## 11. Disclaimers
+## 12. Disclaimers
 
 Trading CFDs/FX carries significant risk of loss. Bugs, broker differences,
 and market gaps can all produce outcomes different from the backtest — and

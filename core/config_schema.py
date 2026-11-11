@@ -113,7 +113,7 @@ def validate_config(cfg: dict) -> dict:
     errors: list[str] = []
 
     # optional sections get empty defaults so downstream code can rely on them
-    for name in ("kronos", "news", "telegram", "llm"):
+    for name in ("kronos", "news", "telegram", "llm", "ea"):
         cfg.setdefault(name, {})
 
     mt5 = _section(cfg, "mt5", errors)
@@ -217,7 +217,22 @@ def validate_config(cfg: dict) -> dict:
     llm = cfg.get("llm") or {}
     _boolean(errors, llm, "llm", "enabled")
     _string(errors, llm, "llm", "gemini_model", required=False)
-    _number(errors, llm, "llm", "timeout_sec", lo=1, hi=120, required=False)
+    _number(errors, llm, "llm", "timeout_seconds", lo=1, hi=120, required=False)
+
+    ea = cfg.get("ea") or {}
+    _boolean(errors, ea, "ea", "enabled")
+    _boolean(errors, ea, "ea", "allow_live")
+    host = ea.get("host", "127.0.0.1")
+    if not isinstance(host, str) or not host.strip():
+        errors.append("ea.host: must be a non-empty string")
+    elif host not in ("127.0.0.1", "localhost", "::1"):
+        errors.append("ea.host: v1 supports loopback only (127.0.0.1/localhost/::1)")
+    _integer(errors, ea, "ea", "port", lo=1, hi=65535, required=False)
+    _integer(errors, ea, "ea", "heartbeat_ms", lo=250, hi=60000, required=False)
+    _number(errors, ea, "ea", "ack_timeout_seconds", lo=1, hi=120, required=False)
+    _number(errors, ea, "ea", "disconnect_grace_seconds", lo=5, hi=600,
+            required=False)
+    _string(errors, ea, "ea", "token_file", required=False)
 
     strategies = cfg.get("strategies")
     if strategies is not None:
