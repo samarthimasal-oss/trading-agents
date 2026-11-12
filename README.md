@@ -33,10 +33,12 @@ pass out-of-sample validation. See section 6.
 Expert Advisor with native five-strategy signals, broker-side SL/TP, risk
 sizing, partial/breakeven/trailing/time exits, idempotent intents, halt/resume,
 reconciliation and Strategy Tester reports. It compiles with zero errors and
-zero warnings and runs in the tester without Python. Three in-sample tester
-passes lost money (**-18.66R** over three months, PF 0.77), so the EA stays
-PAPER/dry-run by default and is not authorised for live trading. Reports:
-[`docs/reports/`](docs/reports/README.md). Protocol:
+zero warnings and runs in the tester without Python. The Python↔EA PAPER
+smoke test passed on 2026-11-11 (dry-run ack, duplicate rejection,
+bridge-restart reconnect, zero-mismatch reconciliation). Three in-sample
+tester passes lost money (**-18.66R** over three months, PF 0.77), so the EA
+stays PAPER/dry-run by default and is not authorised for live trading.
+Reports: [`docs/reports/`](docs/reports/README.md). Protocol:
 [`docs/PROTOCOL.md`](docs/PROTOCOL.md). See section 7.
 
 ```
@@ -244,14 +246,20 @@ Before the first attach, allow loopback sockets in the terminal:
 1. **Tools → Options → Expert Advisors**.
 2. Enable **Allow WebRequest for listed URL**.
 3. Add `127.0.0.1` (host only, no scheme or port; this is the address passed to
-   `SocketConnect`). Some builds also accept `http://127.0.0.1:8765`.
-4. Click **OK**, restart MT5, and confirm the entry is still listed.
+   `SocketConnect`). On build 6316, adding only `http://127.0.0.1:8765` did
+   not authorize `SocketConnect`; the host-only row is required.
+4. Double-click the empty row below the last entry, type `127.0.0.1`, press
+   **Enter**, then click **OK**. The entry is active immediately, but build
+   6316 does not persist it across a clean restart.
 
 MT5 stores the list encrypted in `common.ini`; hand-editing the file with a
-plaintext URL has no effect. In testing, a UI-added entry did not survive a
-terminal restart and `common.ini` was not rewritten, so always verify after a
-restart. `SocketConnect` fails with **4014** when the host is not allowed, and
-with **5272** when the whitelist is fine but the bridge is down.
+plaintext URL has no effect, and a startup INI with
+`[Experts] WebRequestUrl=127.0.0.1` did not seed the list either. In testing,
+the UI-added host-only entry worked immediately but did not survive a clean
+terminal restart and `common.ini` was not rewritten. Re-add `127.0.0.1` after
+every terminal restart. `SocketConnect` fails with **4014** when the host is
+not allowed, and with **5272** when the whitelist is fine but the bridge is
+down.
 
 EA inputs of interest:
 
@@ -301,7 +309,13 @@ For the native EA, also verify the bridge before attaching it:
 ```powershell
 python main.py ea-token
 python main.py ea-server --seconds 30      # expect a clean bind/stop, no token error
+python scripts\ea_live_smoke.py            # PAPER-only; run during session hours
 ```
+
+`ea_live_smoke.py` sends a PAPER intent, verifies the `dry_run` and duplicate
+acks, restarts the bridge and reconciles. Run it during London/overlap/New
+York hours; outside those it prints `SKIP` and exits 2. It refuses to run
+unless the EA reports `mode=PAPER`.
 
 Then:
 

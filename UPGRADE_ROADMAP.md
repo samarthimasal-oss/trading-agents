@@ -327,7 +327,7 @@ feature layer; they may not share a single consensus direction as their only out
 **Objective:** move order placement and position management into a deterministic EA that runs
 in the Strategy Tester without Python.
 
-**Status (2026-11-06):** implementation complete and compiled cleanly
+**Status (2026-11-11):** implementation complete and compiled cleanly
 (`#property strict`, 0 errors / 0 warnings). The EA has native five-strategy
 signals, broker-side stops, risk sizing, partial/BE/trail/time exits, persisted
 idempotency keys, halt/resume, position snapshots, reconciliation, and
@@ -340,13 +340,17 @@ The results are **negative**, so the EA remains PAPER/dry-run by default and no
 engine is promoted to live execution. Reports and caveats are archived in
 [`docs/reports/`](docs/reports/README.md).
 
-On 2026-11-06 the EA attached to the Python bridge on the demo account,
-authenticated, sent `hello`/heartbeats and completed two reconciliation passes
-with zero mismatches. Still open before this phase exits: a PAPER `dry_run`
-intent, EA-side duplicate rejection, a bridge-restart/reconnect cycle, and a
-clean terminal restart with the socket whitelist persisted; plus
-real-tick/variable-spread/commission data and the Phase 2 walk-forward/holdout
-gates.
+On 2026-11-11 the demo smoke test completed the live protocol checks: the EA
+authenticated, returned a PAPER `dry_run` ack, rejected the same idempotency
+key as `duplicate` after the Python cache was cleared, reconnected after a
+bridge restart, and reconciled with zero mismatches. The account stayed flat.
+Evidence:
+[`docs/reports/phase3_ea_live_smoke_2026-11-11.md`](docs/reports/phase3_ea_live_smoke_2026-11-11.md).
+
+Still open before this phase exits: the socket whitelist is not persisted by
+terminal build 6316 (re-add `127.0.0.1` after every restart), mid-trade
+kill/recovery drills, real-tick/variable-spread/commission tester data, and the
+Phase 2 walk-forward/holdout gates.
 
 #### 3.1 EA responsibilities
 
@@ -391,8 +395,9 @@ Rules:     - every intent has idempotency_key = sha256(strategy|symbol|bar_time|
 - `#property strict`; compiles with zero errors and zero warnings in MetaEditor.
 - Runs a full Strategy Tester pass on XAUUSD M15 with real ticks, variable spread and
   commission.
-- Python↔EA: hello, heartbeat, intent, ack, duplicate rejection, disconnect recovery,
-  restart reconciliation all tested on demo.
+- Python↔EA: hello, heartbeat, PAPER intent, `dry_run` ack, duplicate
+  rejection, bridge-restart reconnect and reconciliation all tested on demo
+  on 2026-11-11.
 - Kill Python mid-trade: EA keeps SL/TP/BE/trail and blocks new entries after grace.
 - Kill EA: Python detects missing heartbeat and stops sending; positions remain protected.
 - No duplicate position after a simulated timeout/retry.

@@ -75,8 +75,10 @@ The same pass also:
 - Walk-forward, out-of-sample and holdout validation on 30+ days of M1 data.
 - Monte Carlo / parameter-stability checks.
 - Real tick data with variable spread and realistic commission.
-- Python↔EA demo verification: hello, heartbeat and two reconciliation passes
-  were observed on 2026-11-06. Still outstanding: dry-run intent, duplicate
-  rejection, disconnect recovery and restart reconciliation (see
-  [`docs/PROTOCOL.md`](../PROTOCOL.md) §13).
+- Python↔EA demo verification: **passed on 2026-11-11** — `hello`, PAPER
+  `dry_run` ack, EA-side duplicate rejection, bridge restart/reconnect and
+  zero-mismatch reconciliation. Evidence:
+  [`phase3_ea_live_smoke_2026-11-11.md`](phase3_ea_live_smoke_2026-11-11.md).
+  Still open: mid-trade kill/recovery drills and the per-restart socket
+  whitelist on terminal build 6316.
 - Only after those pass should any engine be considered for live execution.

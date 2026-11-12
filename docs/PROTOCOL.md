@@ -39,12 +39,17 @@ attach:
 1. **Tools → Options → Expert Advisors**.
 2. Enable **Allow WebRequest for listed URL**.
 3. Add `127.0.0.1` (host only, no scheme or port; this is the address passed to
-   `SocketConnect`). Some builds also accept `http://127.0.0.1:8765`.
-4. Click **OK**, restart the terminal, and verify the entry is still listed.
+   `SocketConnect`). On build 6316, adding only `http://127.0.0.1:8765` did
+   not authorize `SocketConnect`; the host-only row is required.
+4. Double-click the empty row below the last entry, type `127.0.0.1`, press
+   **Enter**, then click **OK**.
 
 The list is encrypted in `config/common.ini`; writing a plaintext URL into
-`WebRequestUrl` is ignored. In testing, a UI-added entry did not survive a
-terminal restart and the file was not rewritten, so verify after restarting.
+`WebRequestUrl` is ignored. On the tested build 6316, the UI-added entry took
+effect immediately in memory but was **not persisted**: `common.ini` was not
+rewritten, and a clean terminal restart dropped the entry. Re-add the
+host-only row after every terminal restart. A startup INI containing
+`[Experts] WebRequestUrl=127.0.0.1` did not seed the list either.
 Error **4014** means the address is not allowed; **5272** means the whitelist
 is active but nothing is listening.
 
@@ -364,13 +369,22 @@ Verified:
 - [x] After the bridge stopped, the EA logged the disconnect and reconnect
   attempts returned **5272** (connection refused), confirming the whitelist
   gate was open in that session.
+- [x] On 2026-11-11 the full PAPER smoke test passed: a Python `intent`
+  produced a `dry_run` ack (`retcode 0`); the same key after clearing only the
+  Python ack cache produced `duplicate` (`retcode 10025`); a bridge restart
+  led to an EA reconnect and reconciliation with `mismatches: []`,
+  `unknown_keys: []` and a flat account (balance = equity = 100,149.78 USD).
+  Evidence:
+  [`reports/phase3_ea_live_smoke_2026-11-11.md`](reports/phase3_ea_live_smoke_2026-11-11.md).
 
 Not yet verified live (open):
 
-- [ ] Python → EA `intent` producing a PAPER `dry_run` ack.
-- [ ] EA-side duplicate rejection after clearing the Python ack cache.
-- [ ] Bridge restart → EA reconnect → reconciliation cycle.
-- [ ] Clean terminal restart with the whitelist persisted (the UI addition
-  used during testing was not written back by this terminal build).
+- [ ] Clean terminal restart with the socket whitelist persisted. Build 6316
+  requires the host-only `127.0.0.1` row to be re-added after every restart.
+- [ ] Kill Python while a position is open; confirm the EA blocks new entries
+  after the grace period and keeps managing SL/TP, breakeven and trailing.
+- [ ] Kill the EA while a position is open; confirm Python stops sending and
+  the position remains protected by broker-side stops.
+- [ ] A `LIVE` intent on demo (deliberately not run; keep `InpMode=PAPER`).
 
 Until those pass, keep `InpMode=PAPER` and do not enable live execution.

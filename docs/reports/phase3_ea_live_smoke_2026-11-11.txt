@@ -1,0 +1,90 @@
+# Phase 3 EA live smoke evidence — 2026-11-11
+#
+# Captured from the supervised PAPER-mode run on the MetaQuotes demo account.
+# The token and token file contents are intentionally omitted.
+#
+# Command (from the repository root, with PYTHONPATH set to the repo):
+#   python -u %TEMP%\ea_live_smoke.py
+#
+# ---------------------------------------------------------------------------
+# Python smoke probe output (verbatim)
+# ---------------------------------------------------------------------------
+intent 804211fd70736a01 price 4030.73 sl 4025.73 tp 4038.73
+bridge1 listening 8765
+bridge1 hello {"account": 5057915388, "dry_run": true, "magic": 20261102, "mode": "PAPER", "period": "PERIOD_M15", "role": "ea", "server": "MetaQuotes-Demo", "symbol": "XAUUSD", "terminal_build": 6316, "utc_offset_seconds": 7200, "version": "1.0.0"}
+ACK1 dry_run ticket 0 retcode 0 name NONE message dry-run: validated, no order sent
+ACK2 duplicate ticket 0 retcode 10025 name TRADE_RETCODE_NO_CHANGES message duplicate idempotency key
+bridge2 listening 8765
+bridge2 hello {"account": 5057915388, "dry_run": true, "magic": 20261102, "mode": "PAPER", "period": "PERIOD_M15", "role": "ea", "server": "MetaQuotes-Demo", "symbol": "XAUUSD", "terminal_build": 6316, "utc_offset_seconds": 7200, "version": "1.0.0"}
+RECONCILE {"account": {"balance": 100149.78, "currency": "USD", "equity": 100149.78, "leverage": 100, "margin_free": 100149.78}, "broker_orders": [], "broker_positions": [], "mismatches": [], "positions": [], "server_time": 1794406491.0, "unknown_keys": []}
+STATUS {"authenticated": true, "connected": true, "hello": {"account": 5057915388, "dry_run": true, "magic": 20261102, "mode": "PAPER", "period": "PERIOD_M15", "role": "ea", "server": "MetaQuotes-Demo", "symbol": "XAUUSD", "terminal_build": 6316, "utc_offset_seconds": 7200, "version": "1.0.0"}, "host": "127.0.0.1", "last_heartbeat_age": 0.0, "listening": true, "peer": ["127.0.0.1", 63612], "pending": 0, "port": 8765, "positions": 0, "stale": false, "unknown_keys": []}
+SMOKE DONE
+
+# ---------------------------------------------------------------------------
+# MT5 Experts log excerpt (MQL5\Logs\20261111.log)
+# ---------------------------------------------------------------------------
+# 19:35:43  TA: connected to Python bridge 127.0.0.1:8765
+# 19:37:17  TA deinit: reason=9 trades=0 netR=0.00
+# 19:39:11  TA init: symbol=XAUUSD tf=PERIOD_M15 mode=PAPER magic=20261102 risk=0.50% maxpos=1 maxspread=80 native=on token=ok
+# 19:40:11  TA: Python bridge unavailable: SocketConnect(127.0.0.1:8765) failed: 4014
+# 19:44:22  TA: Python bridge unavailable: SocketConnect(127.0.0.1:8765) failed: 5272
+# 19:44:47  TA: connected to Python bridge 127.0.0.1:8765
+# 19:44:49  TA: socket disconnected
+# 19:44:51  TA: connected to Python bridge 127.0.0.1:8765
+# 19:44:52  TA: socket disconnected
+# 19:45:01  TA native entry: trend conf=0.79 rr=2.00 SELL @ 4030.62000
+# 19:45:13  TA: connected to Python bridge 127.0.0.1:8765
+
+# ---------------------------------------------------------------------------
+# 8-hour bridge log after the smoke test
+# ---------------------------------------------------------------------------
+# 19:45:13 INFO ea_client: EA bridge listening on 127.0.0.1:8765
+# 19:45:13 INFO ea_client: EA connected from ('127.0.0.1', 57782) account=5057915388 symbol=XAUUSD mode=PAPER
+# 19:45:13 INFO ea_client: EA reconciliation: 0 mismatches
+# 19:45:13 INFO ea_client: EA reconciliation: 0 mismatches
+
+# ---------------------------------------------------------------------------
+# Account check immediately after the run
+# ---------------------------------------------------------------------------
+# account 5057915388 balance 100149.78 equity 100149.78
+# positions 0
+
+# ---------------------------------------------------------------------------
+# Socket whitelist observation
+# ---------------------------------------------------------------------------
+# common.ini was not rewritten by the Options dialog:
+#   LastWriteTime 11-11-2026 19:28:17
+#   Length        2060
+#   WebRequestUrl remained an encrypted blob.
+# The host-only entry 127.0.0.1 was active in memory for this terminal session.
+# A clean terminal restart dropped it and SocketConnect returned 4014 again.
+# A startup INI with [Experts] WebRequestUrl=127.0.0.1 did not seed the list.
+
+# ---------------------------------------------------------------------------
+# Later session-gate observation (2026-11-11 22:35 local)
+# ---------------------------------------------------------------------------
+# Command: python scripts\ea_live_smoke.py --timeout 180
+# bridge1 hello {"account": 5057915388, "dry_run": true, "magic": 20261102,
+#                "mode": "PAPER", ...}
+# ACK1 rejected ticket 0 retcode 10013 name TRADE_RETCODE_INVALID
+#      message outside london/overlap/newyork
+# FAIL: expected dry_run, got rejected
+#
+# The EA reconnected from the long-idle stale socket. The rejection is the
+# EA's session gate working as designed. The script was then updated to print
+# SKIP and exit 2 for this expected out-of-session case.
+
+# ---------------------------------------------------------------------------
+# Repeat run with the committed script (2026-11-12 19:18 local, New York)
+# ---------------------------------------------------------------------------
+# Command: python scripts\ea_live_smoke.py --timeout 120
+intent a6341fdbb6e03c25 price 3895.53 sl 3890.53 tp 3903.53
+bridge1 listening 8765
+bridge1 hello {"account": 5057915388, "dry_run": true, "magic": 20261102, "mode": "PAPER", "period": "PERIOD_M15", "role": "ea", "server": "MetaQuotes-Demo", "symbol": "XAUUSD", "terminal_build": 6316, "utc_offset_seconds": 7200, "version": "1.0.0"}
+ACK1 dry_run ticket 0 retcode 0 name NONE message dry-run: validated, no order sent
+ACK2 duplicate ticket 0 retcode 10025 name TRADE_RETCODE_NO_CHANGES message duplicate idempotency key
+bridge2 listening 8765
+bridge2 hello {"account": 5057915388, "dry_run": true, "magic": 20261102, "mode": "PAPER", "period": "PERIOD_M15", "role": "ea", "server": "MetaQuotes-Demo", "symbol": "XAUUSD", "terminal_build": 6316, "utc_offset_seconds": 7200, "version": "1.0.0"}
+RECONCILE {"account": {"balance": 100149.78, "currency": "USD", "equity": 100149.78, "leverage": 100, "margin_free": 100149.78}, "broker_orders": [], "broker_positions": [], "mismatches": [], "positions": [], "server_time": 1794491338.0, "unknown_keys": []}
+STATUS {"authenticated": true, "connected": true, "hello": {"account": 5057915388, "dry_run": true, "magic": 20261102, "mode": "PAPER", "period": "PERIOD_M15", "role": "ea", "server": "MetaQuotes-Demo", "symbol": "XAUUSD", "terminal_build": 6316, "utc_offset_seconds": 7200, "version": "1.0.0"}, "host": "127.0.0.1", "last_heartbeat_age": 0.0, "listening": true, "peer": ["127.0.0.1", 49850], "pending": 0, "port": 8765, "positions": 0, "stale": false, "unknown_keys": []}
+SMOKE PASS
