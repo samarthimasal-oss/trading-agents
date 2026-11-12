@@ -1,0 +1,81 @@
+﻿================================================================================
+WALK-FORWARD / HOLDOUT VALIDATION (fixed rules, net-of-cost R)
+================================================================================
+data                  : csv=docs\reports\xauusd_m15_12000_2026-11-12.csv (12000 bars)
+symbol/timeframe      : XAUUSD M15 (12000 bars)
+sample                : 2026-05-06 05:00 -> 2026-11-12 16:00 UTC (last closed bar)
+trades                : 327 OOS + 102 holdout attributed by entry time
+split                 : 4 expanding folds + untouched holdout (25% of bars)
+holdout               : 2026-09-25 19:15 -> 2026-11-12 16:15 UTC (exclusive end)
+warmup / tail         : 210 bars / 210 bars
+costs                 : spread 20.0 pts + slippage 2.0 pts per side
+attribution           : a trade belongs to the fold where it was entered
+notes                 : fixed rules, no parameter fitting; folds test temporal stability
+
+Folds (out-of-sample test windows)
+fold test window (UTC)             bars trades   win%   totalR    expR     PF   maxDD
+-------------------------------------------------------------------------------------
+   1 05-08 13:30 -> 06-12 14:15    2198     88   33.0    -9.77  -0.111   0.76   20.71
+   2 06-12 14:15 -> 07-17 19:15    2198     71   42.3    -1.33  -0.019   0.95    5.90
+   3 07-17 19:15 -> 08-21 18:30    2197     84   42.9     6.85   0.082   1.22    5.23
+   4 08-21 18:30 -> 09-25 19:15    2197     84   34.5    -2.63  -0.031   0.93   10.06
+
+OOS aggregate (all folds combined)
+strategy         trades   win%   totalR    expR     PF   maxDD  sharpe
+----------------------------------------------------------------------
+trend               111   39.6    16.92   0.152   1.40    5.10    1.47
+breakout              0    0.0     0.00   0.000   0.00    0.00    0.00
+smc                  99   31.3   -17.85  -0.180   0.54   19.98   -2.30
+momentum             57   43.9     1.76   0.031   1.09    7.89    0.25
+mean_reversion       60   40.0    -7.70  -0.128   0.79    9.77   -0.89
+----------------------------------------------------------------------
+COMBINED            327   37.9    -6.87  -0.021   0.95   22.62   -0.38
+
+Holdout (untouched, evaluated once, never used for selection)
+strategy         trades   win%   totalR    expR     PF   maxDD  sharpe
+----------------------------------------------------------------------
+trend                32   34.4    -1.38  -0.043   0.91    5.60   -0.23
+breakout              0    0.0     0.00   0.000   0.00    0.00    0.00
+smc                  36   30.6    -1.44  -0.040   0.90    4.03   -0.23
+momentum             21   28.6     0.40   0.019   1.04    4.55    0.08
+mean_reversion       13   23.1    -6.11  -0.470   0.40    6.62   -1.61
+----------------------------------------------------------------------
+COMBINED            102   30.4    -8.52  -0.084   0.83   14.71   -0.79
+
+Monte Carlo bootstrap (2000 resamples, seed 42, 327 trades; iid caveat)
+total R       p5=  -35.66  p50=   -6.80  p95=   21.64
+expectancy    p5=  -0.109  p50=  -0.021  p95=   0.066 R
+max drawdown  p50=  22.78  p95=  43.54 R
+P(total R > 0) = 35.2%   P(PF > 1) = 35.2%   P(maxDD > 10.0R) = 97.5%
+
+Parameter sensitivity (OOS folds only; holdout excluded)
+variant              trades   win%   totalR    expR     PF   maxDD
+------------------------------------------------------------------
+baseline                327   37.9    -6.87  -0.021   0.95   22.62
+min_rr_0.6              327   37.9    -6.87  -0.021   0.95   22.62
+min_rr_1.0              324   38.6    -1.34  -0.004   0.99   24.26
+min_rr_1.5              303   38.0     1.78   0.006   1.01   19.98
+min_conf_0.35           327   37.9    -6.87  -0.021   0.95   22.62
+min_conf_0.55           321   38.3    -4.78  -0.015   0.96   21.42
+max_bars_12             384   43.5    -3.81  -0.010   0.97   25.66
+max_bars_40             327   37.9    -6.87  -0.021   0.95   22.62
+atr_stop_0.8x           329   36.8    -8.31  -0.025   0.94   24.28
+atr_stop_1.2x           323   38.7    -3.67  -0.011   0.97   22.53
+positive variants     : 1/10 (10%)
+
+Gates
+[PASS] oos_trades                   327 >= 30 out-of-sample trades
+[FAIL] oos_expectancy               -0.021R >= 0.020R per trade
+[FAIL] oos_profit_factor            0.95 >= 1.10
+[FAIL] fold_consistency             1/4 folds positive (25%) >= 60%
+[FAIL] mc_positive_probability      P(total R > 0) = 35.2% >= 90%
+[FAIL] mc_drawdown                  p95 max drawdown 43.54R <= 10.00R
+[FAIL] sensitivity_positive_share   1/10 variants positive (10%) >= 60%
+[PASS] holdout_trades               102 >= 10 holdout trades
+[FAIL] holdout_expectancy           -0.084R > 0R per holdout trade
+
+VERDICT: FAIL (2/9 passed, 7 failed, 0 skipped)
+A PASS is necessary, not sufficient: it does not authorise live trading or override the risk governor.
+No parameter was selected on the holdout.  Negative or inconclusive results must not be promoted.
+================================================================================
+JSON written to docs\reports\walkforward_2026-11-12.json

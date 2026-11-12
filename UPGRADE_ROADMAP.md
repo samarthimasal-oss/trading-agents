@@ -242,9 +242,14 @@ git status                                 # no secrets/state/backups
 **Objective:** one data engine and five genuinely independent strategies.
 
 **Status:** the data engine, causal features, structure detectors, five engines, registry,
-arbiter, replay harness and tests are implemented. The replay runs on the synthetic fixture;
-a 30-day MT5 XAUUSD replay plus walk-forward/holdout validation remains the Phase 2 exit gate
-and must pass before any engine is wired into live execution.
+arbiter, replay harness and tests are implemented. The Phase 2 exit validation is
+**complete and FAILED** (2026-11-12): 12,000 XAUUSD M15 bars, four expanding folds
+plus an untouched 25% holdout. Out-of-sample: 327 trades, -6.87R, PF 0.95;
+holdout: 102 trades, -8.52R, PF 0.83; 2 of 9 gates passed. The walk-forward,
+Monte Carlo and parameter-sensitivity harness is implemented and tested
+(`research/walkforward.py`, `python main.py walkforward`). No engine is promoted
+and the engines remain research-only. Evidence:
+[`docs/reports/phase2_walkforward_2026-11-12.md`](docs/reports/phase2_walkforward_2026-11-12.md).
 
 #### 2.1 Market data engine
 
@@ -349,8 +354,9 @@ Evidence:
 
 Still open before this phase exits: the socket whitelist is not persisted by
 terminal build 6316 (re-add `127.0.0.1` after every restart), mid-trade
-kill/recovery drills, real-tick/variable-spread/commission tester data, and the
-Phase 2 walk-forward/holdout gates.
+kill/recovery drills, and real-tick/variable-spread/commission tester data.
+The Phase 2 walk-forward/holdout gate is complete and **FAILED**; it does not
+block the PAPER EA smoke work, but it blocks any live promotion.
 
 #### 3.1 EA responsibilities
 

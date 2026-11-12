@@ -11,6 +11,7 @@ Usage:
   python main.py run                  # LIVE trading on MT5 (careful!)
   python main.py status               # account + bot positions + journal
   python main.py strategies --csv x   # five-engine research report
+  python main.py walkforward --bars 12000  # walk-forward + untouched holdout
   python main.py ea-token             # create shared EA token (loopback bridge)
   python main.py ea-server            # listen for the native MQL5 EA
 """
@@ -173,13 +174,11 @@ def cmd_backtest(cfg: dict, args) -> int:
     return 0
 
 
-def cmd_strategies(cfg: dict, args) -> int:
-    """Run the five-engine research replay and print per-strategy metrics."""
+def _read_strategy_frame(cfg: dict, args):
+    """Load OHLCV bars for research commands (CSV or MT5)."""
     import pandas as pd
 
-    from market.data_engine import epoch_seconds
-    from strategies.registry import build_strategies
-    from strategies.replay import ReplayConfig, format_report, run_replay
+    from market.data_engine import epoch_seconds, normalize_epoch
 
     if args.csv:
         df = pd.read_csv(args.csv)
@@ -187,30 +186,33 @@ def cmd_strategies(cfg: dict, args) -> int:
             if df.index.name in ("time", "dt"):
                 df = df.reset_index()
             else:
-                print("CSV requires a 'time' column (epoch seconds or datetime).")
-                return 2
+                raise ValueError(
+                    "CSV requires a 'time' column (epoch seconds or datetime).")
         if not pd.api.types.is_numeric_dtype(df["time"]):
             df["time"] = epoch_seconds(df["time"])
         else:
-            from market.data_engine import normalize_epoch
-
             df["time"] = normalize_epoch(df["time"])
-        note = f"csv={args.csv} ({len(df)} bars)"
-    else:
-        from agents.quant import to_frame
-        from core.mt5_client import MT5Client
+        return df, f"csv={args.csv} ({len(df)} bars)"
 
-        symbol = args.symbol or cfg["trading"]["symbol"]
-        client = MT5Client(cfg["mt5"])
-        client.connect()
-        try:
-            resolved = client.resolve_symbol(symbol)
-            raw = client.copy_bars(resolved, cfg["trading"]["timeframe"], int(args.bars))
-            df = to_frame(raw).reset_index()
-            df["time"] = epoch_seconds(df["time"])
-        finally:
-            client.shutdown()
-        note = f"MT5 {resolved} {cfg['trading']['timeframe']} ({len(df)} bars)"
+    from agents.quant import to_frame
+    from core.mt5_client import MT5Client
+
+    symbol = args.symbol or cfg["trading"]["symbol"]
+    client = MT5Client(cfg["mt5"])
+    client.connect()
+    try:
+        resolved = client.resolve_symbol(symbol)
+        raw = client.copy_bars(resolved, cfg["trading"]["timeframe"], int(args.bars))
+        df = to_frame(raw).reset_index()
+        df["time"] = epoch_seconds(df["time"])
+    finally:
+        client.shutdown()
+    return df, f"MT5 {resolved} {cfg['trading']['timeframe']} ({len(df)} bars)"
+
+
+def _strategy_overrides(args, df) -> tuple[dict, str]:
+    """Research replay overrides plus a note about inferred price scale."""
+    import pandas as pd
 
     overrides = {}
     if args.csv:
@@ -227,6 +229,7 @@ def cmd_strategies(cfg: dict, args) -> int:
 
     # A research CSV may not be the configured instrument.  Infer a sane
     # scale for FX-like prices instead of charging gold-sized spreads on EURUSD.
+    note = ""
     median_close = float(pd.to_numeric(df["close"], errors="coerce").median())
     if median_close < 10.0:
         if "point" not in overrides:
@@ -237,7 +240,22 @@ def cmd_strategies(cfg: dict, args) -> int:
             overrides["spread_points"] = 1.5
         if "slippage_points" not in overrides:
             overrides["slippage_points"] = 0.2
-        note += " | FX-like scale inferred"
+        note = " | FX-like scale inferred"
+    return overrides, note
+
+
+def cmd_strategies(cfg: dict, args) -> int:
+    """Run the five-engine research replay and print per-strategy metrics."""
+    from strategies.registry import build_strategies
+    from strategies.replay import ReplayConfig, format_report, run_replay
+
+    try:
+        df, note = _read_strategy_frame(cfg, args)
+    except (ValueError, OSError) as exc:
+        print(f"strategies data error: {exc}")
+        return 2
+    overrides, scale_note = _strategy_overrides(args, df)
+    note += scale_note
 
     replay_cfg = ReplayConfig.from_config(cfg, **overrides)
     engines = build_strategies(cfg)
@@ -247,6 +265,62 @@ def cmd_strategies(cfg: dict, args) -> int:
                         data_note=note)
     print(format_report(result))
     return 0
+
+
+def cmd_walkforward(cfg: dict, args) -> int:
+    """Run expanding-window out-of-sample folds plus one untouched holdout."""
+    import json
+    from pathlib import Path
+
+    from research.walkforward import (
+        WalkForwardConfig,
+        format_report as format_walkforward,
+        run_walk_forward,
+    )
+    from strategies.registry import build_strategies
+    from strategies.replay import ReplayConfig
+
+    try:
+        df, note = _read_strategy_frame(cfg, args)
+    except (ValueError, OSError) as exc:
+        print(f"walkforward data error: {exc}")
+        return 2
+    overrides, scale_note = _strategy_overrides(args, df)
+    note += scale_note
+    replay_cfg = ReplayConfig.from_config(cfg, **overrides)
+
+    def engines_factory(run_config):
+        engines = build_strategies(run_config)
+        if args.only:
+            engines = {args.only: engines[args.only]}
+        return engines
+
+    wf = WalkForwardConfig(
+        folds=int(args.folds),
+        holdout_fraction=float(args.holdout),
+        warmup_bars=int(replay_cfg.warmup_bars),
+        min_test_bars=int(args.min_test_bars),
+        mc_runs=int(args.mc_runs),
+        mc_seed=int(args.seed),
+        run_sensitivity=not bool(args.no_sensitivity),
+    )
+    try:
+        result = run_walk_forward(
+            df, cfg, replay=replay_cfg, wf=wf,
+            engines_factory=engines_factory, data_note=note,
+        )
+    except ValueError as exc:
+        print(f"walkforward error: {exc}")
+        return 2
+
+    print(format_walkforward(result))
+    if args.json:
+        path = Path(args.json)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as handle:
+            json.dump(result.as_dict(), handle, indent=2, allow_nan=False)
+        print(f"JSON written to {path}")
+    return 0 if result.passed else 1
 
 
 def cmd_testorder(cfg: dict, args) -> int:
@@ -497,6 +571,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="TradingAgents for MT5")
     parser.add_argument("command", choices=["check", "run", "backtest", "status",
                                             "testorder", "strategies",
+                                            "walkforward",
                                             "ea-token", "ea-server"])
     parser.add_argument("--config", default=os.path.join(ROOT, "config.json"))
     parser.add_argument("--symbol", default=None)
@@ -513,6 +588,22 @@ def main() -> int:
     parser.add_argument("--spread-points", default=None, type=float)
     parser.add_argument("--slippage-points", default=None, type=float)
     parser.add_argument("--warmup", default=None, type=int)
+
+    # walk-forward validation options
+    parser.add_argument("--folds", default=4, type=int,
+                        help="walkforward: number of expanding test folds")
+    parser.add_argument("--holdout", default=0.25, type=float,
+                        help="walkforward: holdout fraction of bars (0-0.5)")
+    parser.add_argument("--min-test-bars", default=200, type=int,
+                        help="walkforward: minimum bars per test fold")
+    parser.add_argument("--mc-runs", default=2000, type=int,
+                        help="walkforward: bootstrap resamples")
+    parser.add_argument("--seed", default=42, type=int,
+                        help="walkforward: Monte Carlo seed")
+    parser.add_argument("--json", default=None,
+                        help="walkforward: write the full result as JSON")
+    parser.add_argument("--no-sensitivity", action="store_true",
+                        help="walkforward: skip the parameter-sensitivity grid")
 
     # EA bridge / token options
     parser.add_argument("--token-file", default=None,
@@ -547,6 +638,8 @@ def main() -> int:
         return cmd_backtest(cfg, args)
     if args.command == "strategies":
         return cmd_strategies(cfg, args)
+    if args.command == "walkforward":
+        return cmd_walkforward(cfg, args)
     if args.command == "testorder":
         return cmd_testorder(cfg, args)
     if args.command == "ea-token":

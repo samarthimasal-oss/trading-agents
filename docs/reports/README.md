@@ -1,12 +1,28 @@
-# Phase 3 EA Strategy Tester reports
+# Research and Strategy Tester reports
 
-These are **honest, in-sample smoke-test reports** for the native MQL5 EA
-(`TradingAgentsEA`). They prove the EA compiles, trades, manages positions and
-writes machine-readable reports inside the MetaTrader 5 Strategy Tester. They
-are **not** evidence of an edge and must not be used to promote a strategy to
-live trading.
+These are **honest, in-sample or out-of-sample research reports** for the
+Python strategy engines and the native MQL5 EA (`TradingAgentsEA`). They prove
+the code runs and the validation pipeline works. They are **not** evidence of
+an edge and must not be used to promote a strategy to live trading.
 
-## Runs
+## Phase 2 walk-forward / holdout (Python, 2026-11-12)
+
+`phase2_walkforward_2026-11-12.md` runs the five fixed rule engines across four
+contiguous expanding folds plus one untouched 25% holdout on 12,000 XAUUSD M15
+bars (2026-05-06 → 2026-11-12).
+
+**Result: FAIL — 2 of 9 gates passed.** 327 out-of-sample trades produced
+-6.87R (PF 0.95, expectancy -0.021R); the holdout produced -8.52R over 102
+trades (PF 0.83). The bootstrap median is -6.80R and only 1 of 10 parameter
+variants is positive. Trend was the only positive OOS engine (+16.92R,
+PF 1.40) but lost money in the holdout. Breakout executed zero trades in the
+combined portfolio because of the one-position cap; run alone it produced only
+five OOS trades.
+
+Report, dataset, JSON and transcript:
+[`phase2_walkforward_2026-11-12.md`](phase2_walkforward_2026-11-12.md).
+
+## Phase 3 EA Strategy Tester runs
 
 | Folder | Period | Tester model | Trades | Win rate | Net R | Profit factor | Max DD |
 |---|---|---|---:|---:|---:|---:|---:|
@@ -23,7 +39,7 @@ Each folder contains the EA's `tester_summary.json`, `tester_summary.csv` and
 profit factor, expectancy, Sharpe, drawdown, recovery factor, MFE/MAE, spread
 cost estimate, and strategy/session/month breakdowns.
 
-## What the results say
+## What the EA tester results say
 
 - **No demonstrated edge.** Both periods lose money after costs. Trend is
   roughly break-even (PF 0.97 over three months); momentum and SMC are
@@ -72,8 +88,10 @@ The same pass also:
 
 ## Gates still open
 
-- Walk-forward, out-of-sample and holdout validation on 30+ days of M1 data.
-- Monte Carlo / parameter-stability checks.
+- Walk-forward, out-of-sample and holdout validation: **completed and FAILED**
+  on 2026-11-12 (see above). No engine may be promoted on this evidence.
+- Monte Carlo / parameter-stability checks: **completed in the same run**;
+  median bootstrap negative and 1/10 variants positive.
 - Real tick data with variable spread and realistic commission.
 - Python↔EA demo verification: **passed on 2026-11-11** — `hello`, PAPER
   `dry_run` ack, EA-side duplicate rejection, bridge restart/reconnect and

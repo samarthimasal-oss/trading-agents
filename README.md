@@ -26,8 +26,12 @@ is validated at startup, and the foundation `pytest` suite is green.
 market-data engine, causal feature layer, market-structure detectors, five
 independent strategy engines, a deterministic arbiter, and a conservative
 research replay with per-strategy metrics. The engines are **research-only**:
-live execution still uses the legacy quant/Kronos path until the new engines
-pass out-of-sample validation. See section 6.
+live execution still uses the legacy quant/Kronos path. The 2026-11-12
+walk-forward/holdout run (12,000 XAUUSD M15 bars, four expanding folds plus an
+untouched 25% holdout) **failed 7 of 9 gates** — OOS 327 trades, -6.87R,
+PF 0.95; holdout 102 trades, -8.52R, PF 0.83 — so no engine is wired into live
+execution. See section 6 and
+[`docs/reports/phase2_walkforward_2026-11-12.md`](docs/reports/phase2_walkforward_2026-11-12.md).
 
 **Phase 3 native EA implementation is complete on the same branch:** an MQL5
 Expert Advisor with native five-strategy signals, broker-side SL/TP, risk
@@ -212,6 +216,23 @@ CLI infers an FX-like point/digits/spread scale for it; override with
 `--point`, `--digits`, `--spread-points`, and `--slippage-points` for other
 instruments.
 
+The walk-forward harness adds expanding folds, an untouched holdout, bootstrap
+Monte Carlo and a parameter-sensitivity grid:
+
+```powershell
+python main.py walkforward --bars 12000 --folds 4 --holdout 0.25 --mc-runs 2000 --seed 42
+python main.py walkforward --csv docs\reports\xauusd_m15_12000_2026-11-12.csv `
+  --symbol XAUUSD --json docs\reports\wf.json
+```
+
+It prints fold-by-fold OOS metrics, holdout metrics, Monte Carlo percentiles,
+sensitivity variants and explicit PASS/FAIL gates, then exits 1 when the
+verdict is FAIL. Trades are attributed by entry time; a position may resolve
+after a fold boundary, but no decision sees future bars. The holdout is
+evaluated once and never used for selection. The 2026-11-12 run failed 7/9
+gates; a PASS is necessary but not sufficient and never promotes anything
+automatically.
+
 Configuration lives in `strategies`: `enabled`, `min_confidence`,
 `max_signals_per_bar`, `allow_opposite_directions`, `min_rr`, `weights`,
 per-engine `engines.<name>` blocks, and a `replay` block. The engines are not
@@ -300,8 +321,9 @@ execution. Full reports, caveats and the sizing bug found during the pass are in
 ```powershell
 python main.py backtest --csv demo_1min.csv --bars 500   # legacy quant replay
 python main.py strategies --csv demo_1min.csv           # five-engine research report
+python main.py walkforward --bars 12000                # folds + holdout + Monte Carlo
 python main.py run --dry-run               # full live pipeline, NO real orders
-python -m pytest -q                        # 110-test regression suite
+python -m pytest -q                        # regression suite
 ```
 
 For the native EA, also verify the bridge before attaching it:
