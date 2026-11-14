@@ -567,12 +567,34 @@ def cmd_status(cfg: dict) -> int:
     return 0
 
 
+def cmd_dashboard(cfg: dict, args) -> int:
+    """Serve the local FastAPI + React control room."""
+    import uvicorn
+
+    from api.app import create_app
+    from api.services import ApiSettings
+
+    if args.host and args.host not in ("127.0.0.1", "localhost", "::1"):
+        print("dashboard refuses non-loopback hosts; use an SSH tunnel instead",
+              file=sys.stderr)
+        return 2
+    api_settings = ApiSettings.load(root=ROOT, config_path=args.config)
+    app = create_app(settings=api_settings)
+    host = "127.0.0.1" if args.host in (None, "localhost") else args.host
+    port = int(args.port or 8766)
+    print(f"Dashboard: http://{host}:{port}")
+    print(f"API docs:  http://{host}:{port}/api/docs")
+    print(f"Token:     {api_settings.token_file} (never printed here)")
+    uvicorn.run(app, host=host, port=port, log_level="info")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="TradingAgents for MT5")
     parser.add_argument("command", choices=["check", "run", "backtest", "status",
                                             "testorder", "strategies",
                                             "walkforward",
-                                            "ea-token", "ea-server"])
+                                            "ea-token", "ea-server", "dashboard"])
     parser.add_argument("--config", default=os.path.join(ROOT, "config.json"))
     parser.add_argument("--symbol", default=None)
     parser.add_argument("--bars", default=5000, type=int)
@@ -646,6 +668,8 @@ def main() -> int:
         return cmd_ea_token(cfg, args)
     if args.command == "ea-server":
         return cmd_ea_server(cfg, args)
+    if args.command == "dashboard":
+        return cmd_dashboard(cfg, args)
     return cmd_status(cfg)
 
 

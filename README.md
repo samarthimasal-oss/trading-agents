@@ -78,6 +78,9 @@ Reports: [`docs/reports/`](docs/reports/README.md). Protocol:
 
 ## Run the dashboard
 
+The legacy Flask dashboard remains available while the Phase 7 React console
+reaches feature parity:
+
 ```powershell
 python dashboard.py          # opens http://localhost:5005 in your browser
 ```
@@ -102,6 +105,33 @@ Dashboard highlights:
 - **Today's committee funnel** — filled / vetoed / risk-blocked / flat
 - Equity curve, strategy desk, decision journal, live log
 - Buttons: Start DRY-RUN, Start LIVE, Stop, Reset guardian
+
+### Phase 7 control room (FastAPI + React)
+
+The replacement console is served by the Python API on loopback:
+
+```powershell
+cd web; npm install; npm run build; cd ..
+python main.py dashboard     # http://127.0.0.1:8766
+```
+
+The bearer token is generated once at `state/dashboard_token.txt`; the startup
+message prints the path, never the value. Paste it into the unlock screen.
+The first slice covers Overview, Risk Centre, and Settings:
+
+- Overview: equity curve, open positions, runner/bridge/guardian state, committee
+  freshness, and journal activity. Empty or stale data is labelled, never
+  synthesised.
+- Risk Centre: allow-listed risk limits, runner start/stop, guardian reset, and
+  dry-run or typed-confirmation emergency close-all.
+- Settings: non-secret config edits with validation and backups. Secrets stay
+  redacted and writes are refused while the runner is active.
+
+The console defaults to DRY-RUN and refuses non-loopback binds. Remaining pages
+(Live Trading, AI Committee, Strategy Desk, Market Intelligence, Backtesting,
+Learning Centre) are marked as upcoming until their real controls are wired.
+API docs live at `/api/docs`; the WebSocket authenticates with the same token
+in its first message.
 
 ## 1. Install
 
