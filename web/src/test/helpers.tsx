@@ -3,6 +3,8 @@ import { render } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 
+import { ToastProvider } from "../components/Toast";
+
 export function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -20,7 +22,9 @@ export function renderWithProviders(ui: ReactElement, initialEntries: string[] =
 
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={initialEntries}>{ui}</MemoryRouter>
+      <ToastProvider>
+        <MemoryRouter initialEntries={initialEntries}>{ui}</MemoryRouter>
+      </ToastProvider>
     </QueryClientProvider>,
   );
 }

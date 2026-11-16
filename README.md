@@ -117,7 +117,8 @@ python main.py dashboard     # http://127.0.0.1:8766
 
 The bearer token is generated once at `state/dashboard_token.txt`; the startup
 message prints the path, never the value. Paste it into the unlock screen.
-The first slice covers Overview, Risk Centre, and Settings:
+The first slices cover Overview, Risk Centre, Settings, Live Trading, AI
+Committee, Strategy Desk and Market Intelligence:
 
 - Overview: equity curve, open positions, runner/bridge/guardian state, committee
   freshness, and journal activity. Empty or stale data is labelled, never
@@ -126,10 +127,20 @@ The first slice covers Overview, Risk Centre, and Settings:
   dry-run or typed-confirmation emergency close-all.
 - Settings: non-secret config edits with validation and backups. Secrets stay
   redacted and writes are refused while the runner is active.
+- Live Trading: bot-magic positions and pending orders, floating P/L, live
+  quote, and the read-only decisions/events feed.
+- AI Committee: the runner's `state/live.json` board with agent votes, LLM
+  review and Kronos context, plus recorded LLM reviews from the journal.
+- Strategy Desk: research-only engine overrides (`state/strategy_overrides.json`),
+  a closed-bar signal scan that discards the forming bar, and an in-sample
+  replay with next-bar fills. Results always carry
+  `validation.walkforward_passed: false` until the walk-forward gate passes.
+- Market Intelligence: timeframe-aware quote/candles/features, spread against
+  its configured limit, news calendar windows, and the cached Kronos forecast
+  (stale caches are labelled, and a stale or detached path is not drawn).
 
-The console defaults to DRY-RUN and refuses non-loopback binds. Remaining pages
-(Live Trading, AI Committee, Strategy Desk, Market Intelligence, Backtesting,
-Learning Centre) are marked as upcoming until their real controls are wired.
+The console defaults to DRY-RUN and refuses non-loopback binds. Backtesting
+and Learning Centre are marked as upcoming until their real controls are wired.
 API docs live at `/api/docs`; the WebSocket authenticates with the same token
 in its first message.
 

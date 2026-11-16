@@ -76,7 +76,7 @@ def build_services(settings: ApiSettings | None = None) -> Services:
                        state_store=guardian)
     market = MarketService(mt5, settings.root, config_loader=config_service.raw)
     committee = CommitteeService(settings.root, config_loader=config_service.raw)
-    strategies = StrategiesService(settings.root, config_service, store)
+    strategies = StrategiesService(settings.root, config_service, store, mt5=mt5)
     learning = LearningService(settings.root, journal)
     backtests = BacktestsService(settings.root, store)
 

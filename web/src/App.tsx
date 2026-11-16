@@ -7,9 +7,13 @@ import { AppShell } from "./components/AppShell";
 import { ToastProvider } from "./components/Toast";
 import { LiveProvider } from "./hooks/useLiveSocket";
 import { ComingSoonPage } from "./pages/ComingSoon";
+import { CommitteePage } from "./pages/Committee";
+import { LiveTradingPage } from "./pages/LiveTrading";
+import { MarketIntelligencePage } from "./pages/MarketIntelligence";
 import { OverviewPage } from "./pages/Overview";
 import { RiskCentrePage } from "./pages/RiskCentre";
 import { SettingsPage } from "./pages/Settings";
+import { StrategyDeskPage } from "./pages/StrategyDesk";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -40,10 +44,10 @@ function AuthedApp({ token }: { token: string | null }) {
           <Route index element={<OverviewPage />} />
           <Route path="risk" element={<RiskCentrePage />} />
           <Route path="settings" element={<SettingsPage />} />
-          <Route path="live" element={<ComingSoonPage path="/live" />} />
-          <Route path="committee" element={<ComingSoonPage path="/committee" />} />
-          <Route path="strategies" element={<ComingSoonPage path="/strategies" />} />
-          <Route path="market" element={<ComingSoonPage path="/market" />} />
+          <Route path="live" element={<LiveTradingPage />} />
+          <Route path="committee" element={<CommitteePage />} />
+          <Route path="strategies" element={<StrategyDeskPage />} />
+          <Route path="market" element={<MarketIntelligencePage />} />
           <Route path="backtests" element={<ComingSoonPage path="/backtests" />} />
           <Route path="learning" element={<ComingSoonPage path="/learning" />} />
           <Route path="*" element={<Navigate to="/" replace />} />

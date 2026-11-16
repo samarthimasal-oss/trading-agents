@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from api.auth import require_auth, require_mutation, run_idempotent
 from api.errors import APIError
@@ -31,6 +31,18 @@ class EmergencyClose(BaseModel):
 class StrategyUpdate(BaseModel):
     enabled: bool | None = None
     params: dict[str, Any] | None = None
+
+
+class StrategyScan(BaseModel):
+    symbol: str | None = None
+    timeframe: str = "M15"
+    bars: int = Field(400, ge=260, le=1500)
+
+
+class StrategyReplay(BaseModel):
+    symbol: str | None = None
+    timeframe: str = "M15"
+    bars: int = Field(1500, ge=320, le=1500)
 
 
 @router.get("/runner", dependencies=[Depends(require_auth)])
@@ -126,3 +138,15 @@ def update_strategy(name: str, payload: StrategyUpdate, request: Request) -> dic
     result = _services(request).strategies.update(
         name, enabled=payload.enabled, params=payload.params)
     return {"strategy": result}
+
+
+@router.post("/strategies/signals", dependencies=[Depends(require_auth)])
+def strategy_signals(payload: StrategyScan, request: Request) -> dict:
+    return _services(request).strategies.signals(
+        symbol=payload.symbol, timeframe=payload.timeframe, bars=payload.bars)
+
+
+@router.post("/strategies/replay", dependencies=[Depends(require_auth)])
+def strategy_replay(payload: StrategyReplay, request: Request) -> dict:
+    return _services(request).strategies.replay(
+        symbol=payload.symbol, timeframe=payload.timeframe, bars=payload.bars)

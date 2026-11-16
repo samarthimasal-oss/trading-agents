@@ -138,8 +138,9 @@ class FakeMarket:
                 "digits": 2, "point": 0.01, "spread_points": 10.0,
                 "time": 1794500000.0}
 
-    def overview(self, symbol):
-        return {"symbol": symbol, "quote": {"bid": 1.0, "ask": 1.1},
+    def overview(self, symbol, timeframe="M15"):
+        return {"symbol": symbol, "timeframe": timeframe,
+                "quote": {"bid": 1.0, "ask": 1.1},
                 "kronos": {"available": False, "reason": "no forecast"},
                 "session": "london"}
 
@@ -152,6 +153,19 @@ class FakeStrategies:
 
     def update(self, name, enabled=None, params=None):
         return {"name": name, "enabled": enabled, "params": params or {}}
+
+    def signals(self, symbol=None, timeframe="M15", bars=400):
+        return {"available": True, "symbol": symbol or "XAUUSD",
+                "timeframe": timeframe, "bars": bars - 1,
+                "closed_bars_only": True, "proposals": [], "selected": [],
+                "rejections": {}, "engines": [], "research_only": True}
+
+    def replay(self, symbol=None, timeframe="M15", bars=1500):
+        return {"available": True, "symbol": symbol or "XAUUSD",
+                "timeframe": timeframe, "bars": bars - 1,
+                "closed_bars_only": True, "combined": {"trades": 0},
+                "trades": [], "research_only": True,
+                "validation": {"walkforward_passed": False}}
 
 
 class FakeLearning:
@@ -474,6 +488,33 @@ def test_market_and_committee_and_learning_endpoints_exist(client):
     strategies = client.get("/api/v1/strategies", headers=AUTH)
     assert strategies.status_code == 200
     assert strategies.json()["research_only"] is True
+
+
+def test_strategy_signals_and_replay_call_the_real_service(client, services):
+    signals = client.post("/api/v1/strategies/signals", headers=MUTATE,
+                          json={"symbol": "XAUUSD", "timeframe": "M15", "bars": 400})
+    assert signals.status_code == 200, signals.text
+    assert signals.json()["bars"] == 399
+    replay = client.post("/api/v1/strategies/replay", headers=MUTATE,
+                         json={"symbol": "XAUUSD", "timeframe": "M15", "bars": 500})
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["validation"]["walkforward_passed"] is False
+    assert replay.json()["bars"] == 499
+    assert services.strategies is not None
+
+
+def test_strategy_scan_rejects_too_few_bars(client):
+    response = client.post("/api/v1/strategies/signals", headers=MUTATE,
+                           json={"symbol": "XAUUSD", "bars": 100})
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
+
+
+def test_committee_includes_real_journal_reviews(client):
+    payload = client.get("/api/v1/committee", headers=AUTH).json()
+    assert payload["reviews_available"] is True
+    assert len(payload["reviews"]) == 1
+    assert payload["reviews"][0]["llm_comment"] == "trend supports"
 
 
 def test_websocket_requires_auth_then_pushes_a_snapshot(client):

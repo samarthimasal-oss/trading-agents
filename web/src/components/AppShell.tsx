@@ -23,10 +23,10 @@ import { money, utcClock } from "../lib/format";
 
 const NAV = [
   { to: "/", label: "Overview", icon: LayoutDashboard, ready: true },
-  { to: "/live", label: "Live Trading", icon: Activity, ready: false },
-  { to: "/committee", label: "AI Committee", icon: Users, ready: false },
-  { to: "/strategies", label: "Strategy Desk", icon: SlidersHorizontal, ready: false },
-  { to: "/market", label: "Market Intelligence", icon: Radar, ready: false },
+  { to: "/live", label: "Live Trading", icon: Activity, ready: true },
+  { to: "/committee", label: "AI Committee", icon: Users, ready: true },
+  { to: "/strategies", label: "Strategy Desk", icon: SlidersHorizontal, ready: true },
+  { to: "/market", label: "Market Intelligence", icon: Radar, ready: true },
   { to: "/backtests", label: "Backtesting", icon: FlaskConical, ready: false },
   { to: "/learning", label: "Learning Centre", icon: BrainCircuit, ready: false },
   { to: "/risk", label: "Risk Centre", icon: ShieldAlert, ready: true },

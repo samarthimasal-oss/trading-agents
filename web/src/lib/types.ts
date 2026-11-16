@@ -175,6 +175,18 @@ export interface CommitteeSymbol {
   forecast_candles?: number[][];
 }
 
+export interface CommitteeReview {
+  ts: number;
+  symbol?: string;
+  action?: string;
+  direction?: number;
+  volume?: number;
+  llm_action?: string;
+  llm_comment?: string;
+  reason?: string;
+  executed?: number;
+}
+
 export interface Committee {
   available: boolean;
   reason?: string;
@@ -185,6 +197,202 @@ export interface Committee {
   daily_pnl?: number;
   symbols: Record<string, CommitteeSymbol>;
   warning?: string | null;
+  reviews?: CommitteeReview[];
+  reviews_available?: boolean;
+  reviews_reason?: string;
+}
+
+export interface Candle {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  tick_volume?: number;
+}
+
+export interface MarketQuote {
+  symbol: string;
+  requested_symbol?: string;
+  bid: number;
+  ask: number;
+  digits: number;
+  point: number;
+  spread_points: number;
+  time: number;
+}
+
+export interface MarketFeatures {
+  available: boolean;
+  reason?: string;
+  last_close?: number;
+  ema_fast?: number;
+  ema_slow?: number;
+  rsi?: number;
+  atr?: number;
+  range_high?: number;
+  range_low?: number;
+  structure?: string;
+  regime?: string;
+  bars?: number;
+}
+
+export interface KronosSnapshot {
+  available: boolean;
+  reason?: string;
+  stale?: boolean;
+  age_seconds?: number | null;
+  timeframe?: string;
+  direction?: number | null;
+  move?: number | null;
+  move_next?: number | null;
+  path_high?: number | null;
+  path_low?: number | null;
+  base_close?: number | null;
+  base_ts?: number | null;
+  summary?: string | null;
+  ood?: boolean | null;
+  forecast_candles?: number[][];
+  warning?: string | null;
+  source?: string;
+}
+
+export interface NewsEvent {
+  ts: number;
+  title?: string;
+  currency?: string;
+  impact?: string;
+  blocking?: boolean;
+  [key: string]: unknown;
+}
+
+export interface NewsBlock {
+  available: boolean;
+  enabled?: boolean;
+  stale?: boolean;
+  blocked: boolean;
+  events: NewsEvent[];
+  upcoming?: NewsEvent[];
+  warning?: string | null;
+  reason?: string;
+  calendar_age_seconds?: number | null;
+}
+
+export interface MarketOverview {
+  symbol: string;
+  timeframe: string;
+  ts: number;
+  quote: MarketQuote;
+  features: MarketFeatures;
+  session: string;
+  kronos: KronosSnapshot;
+  news: NewsBlock;
+  spread: { points: number; limit_points: number | null; ok: boolean };
+  tradable: boolean;
+  reasons: string[];
+  candles: Candle[];
+  candle_error?: string | null;
+}
+
+export interface StrategySignal {
+  strategy: string;
+  symbol: string;
+  timeframe: string;
+  direction: number;
+  entry: number;
+  stop: number;
+  target: number;
+  rr: number;
+  confidence: number;
+  expires_at: number;
+  setup_id: string;
+  evidence: string[];
+  invalidators: string[];
+  regime?: string;
+  session?: string;
+  bar_time: number;
+  status?: "selected" | "rejected";
+  reject_reason?: string | null;
+  score?: number;
+}
+
+export interface SignalScan {
+  available: boolean;
+  symbol: string;
+  timeframe: string;
+  generated_at: number;
+  last_closed_bar: number;
+  forming_bar_time: number;
+  bars: number;
+  closed_bars_only: boolean;
+  spread_points: number | null;
+  spread_source: string;
+  spread_assumed_zero: boolean;
+  engines: Array<{ name: string; enabled: boolean; proposals: number }>;
+  proposals: StrategySignal[];
+  selected: StrategySignal[];
+  rejections: Record<string, number>;
+  config_source: string;
+  research_only: boolean;
+}
+
+export interface ReplayTrade {
+  strategy: string;
+  symbol: string;
+  direction: number;
+  entry_time: number;
+  exit_time: number;
+  entry: number;
+  exit: number;
+  r_net: number;
+  mfe_r: number;
+  mae_r: number;
+  bars_held: number;
+  exit_reason: string;
+  session: string;
+  regime: string;
+  confidence: number;
+}
+
+export interface ReplayMetrics {
+  strategy?: string;
+  trades: number;
+  wins?: number;
+  losses?: number;
+  win_rate: number;
+  total_r: number;
+  expectancy_r: number;
+  profit_factor: number | null;
+  max_drawdown_r?: number;
+  avg_mfe_r?: number;
+  avg_mae_r?: number;
+  exit_reasons?: Record<string, number>;
+}
+
+export interface StrategyReplay {
+  available: boolean;
+  symbol: string;
+  timeframe: string;
+  generated_at: number;
+  last_closed_bar: number;
+  forming_bar_time: number;
+  bars: number;
+  closed_bars_only: boolean;
+  data_note: string;
+  spread_points: number;
+  slippage_points: number;
+  spread_source: string;
+  proposals: number;
+  selected: number;
+  rejections: Record<string, number>;
+  combined: ReplayMetrics;
+  by_strategy: Record<string, ReplayMetrics>;
+  by_session: Record<string, ReplayMetrics>;
+  equity_curve: number[];
+  trades: ReplayTrade[];
+  trades_total: number;
+  research_only: boolean;
+  validation: { walkforward_passed: boolean; note: string };
 }
 
 export interface Overview {
@@ -220,6 +428,7 @@ export interface Strategy {
   configured_enabled: boolean;
   weight: number;
   params: Record<string, unknown>;
+  editable_params?: string[];
   overrides: Record<string, unknown>;
   research_only: boolean;
 }

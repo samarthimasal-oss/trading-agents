@@ -2,20 +2,25 @@ import type {
   Account,
   ApiErrorBody,
   BacktestsPayload,
+  Candle,
   Committee,
   Decision,
   EquityPoint,
   Health,
   JournalEvent,
   LearningPayload,
+  MarketOverview,
+  MarketQuote,
   Order,
   Overview,
   Position,
   RiskSnapshot,
   RunnerStatus,
   SettingsPayload,
+  SignalScan,
   Snapshot,
   StrategyList,
+  StrategyReplay,
   SystemInfo,
 } from "./types";
 
@@ -182,11 +187,23 @@ export const api = {
       method: "PATCH",
       body: patch,
     }),
+  strategySignals: (payload: { symbol?: string; timeframe?: string; bars?: number }) =>
+    apiFetch<SignalScan>("/strategies/signals", { method: "POST", body: payload }),
+  strategyReplay: (payload: { symbol?: string; timeframe?: string; bars?: number }) =>
+    apiFetch<StrategyReplay>("/strategies/replay", { method: "POST", body: payload }),
 
   committee: () => apiFetch<Committee>("/committee"),
 
-  marketOverview: (symbol: string) =>
-    apiFetch<Record<string, unknown>>(`/market/overview?symbol=${encodeURIComponent(symbol)}`),
+  marketOverview: (symbol: string, timeframe = "M15") =>
+    apiFetch<MarketOverview>(
+      `/market/overview?symbol=${encodeURIComponent(symbol)}&timeframe=${encodeURIComponent(timeframe)}`,
+    ),
+  marketQuote: (symbol: string) =>
+    apiFetch<MarketQuote>(`/market/quote?symbol=${encodeURIComponent(symbol)}`),
+  marketCandles: (symbol: string, timeframe = "M15", bars = 180) =>
+    apiFetch<{ symbol: string; timeframe: string; count: number; candles: Candle[] }>(
+      `/market/candles?symbol=${encodeURIComponent(symbol)}&timeframe=${encodeURIComponent(timeframe)}&bars=${bars}`,
+    ),
 
   backtests: () => apiFetch<BacktestsPayload>("/backtests"),
   learningSummary: () => apiFetch<LearningPayload>("/learning/summary"),

@@ -25,13 +25,44 @@ def candles(request: Request, symbol: str = Query(..., min_length=1),
 
 
 @router.get("/market/overview")
-def market_overview(request: Request, symbol: str = Query(..., min_length=1)) -> dict:
-    return _services(request).market.overview(symbol)
+def market_overview(request: Request, symbol: str = Query(..., min_length=1),
+                    timeframe: str = "M15") -> dict:
+    return _services(request).market.overview(symbol, timeframe=timeframe)
 
 
 @router.get("/committee")
 def committee(request: Request) -> dict:
-    return _services(request).committee.snapshot()
+    services = _services(request)
+    payload = services.committee.snapshot()
+    try:
+        rows = services.journal.decisions(limit=40)
+    except Exception as exc:                            # noqa: BLE001
+        payload["reviews"] = []
+        payload["reviews_available"] = False
+        payload["reviews_reason"] = f"decision journal unavailable: {exc}"
+        return payload
+    reviews = []
+    for row in rows:
+        action = str(row.get("llm_action") or "").strip().lower()
+        comment = str(row.get("llm_comment") or "").strip()
+        if action in ("", "n/a", "none", "skipped") and not comment:
+            continue
+        reviews.append({
+            "ts": row.get("ts"),
+            "symbol": row.get("symbol"),
+            "action": row.get("action"),
+            "direction": row.get("direction"),
+            "volume": row.get("volume"),
+            "llm_action": row.get("llm_action"),
+            "llm_comment": comment,
+            "reason": row.get("reason"),
+            "executed": row.get("executed"),
+        })
+    payload["reviews"] = reviews
+    payload["reviews_available"] = bool(getattr(services.journal, "available", True))
+    if not reviews:
+        payload["reviews_reason"] = "no LLM review has been recorded in the journal"
+    return payload
 
 
 @router.get("/learning/summary")

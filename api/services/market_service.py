@@ -105,22 +105,26 @@ class MarketService:
                 "candles": rows}
 
     # ---------------------------------------------------------------- overview
-    def overview(self, symbol: str) -> dict:
+    def overview(self, symbol: str, timeframe: str = "M15") -> dict:
         symbol = (symbol or "").strip().upper()
+        timeframe = (timeframe or "M15").upper()
         if not symbol:
             raise APIError(422, "validation_error", "symbol is required")
+        if timeframe not in {"M1", "M5", "M15", "M30", "H1", "H4", "D1"}:
+            raise APIError(422, "validation_error",
+                           f"unsupported timeframe {timeframe!r}")
         cfg = self.config_loader() or {}
         quote = self.quote(symbol)
         bars: list[dict] = []
         candle_error = None
         try:
-            bars = self.mt5.candles(symbol, "M15", 240)
+            bars = self.mt5.candles(symbol, timeframe, 240)
         except Exception as exc:                        # noqa: BLE001
             candle_error = str(exc)
 
         features = self._features(bars) if len(bars) >= 30 else {
             "available": False,
-            "reason": candle_error or "fewer than 30 closed M15 bars",
+            "reason": candle_error or f"fewer than 30 closed {timeframe} bars",
         }
         now = datetime.now(timezone.utc)
         risk = cfg.get("risk") or {}
@@ -147,6 +151,7 @@ class MarketService:
 
         return {
             "symbol": symbol,
+            "timeframe": timeframe,
             "ts": self.clock(),
             "quote": quote,
             "features": features,
@@ -240,6 +245,9 @@ class MarketService:
             "move_next": payload.get("move_next"),
             "path_high": payload.get("path_hi"),
             "path_low": payload.get("path_lo"),
+            "base_close": payload.get("base_close"),
+            "base_ts": payload.get("base_ts"),
+            "summary": payload.get("summary"),
             "ood": payload.get("ood"),
             "forecast_candles": candles[-8:],
             "source": str(path),
