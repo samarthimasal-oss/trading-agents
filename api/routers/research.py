@@ -78,3 +78,13 @@ def learning_trades(request: Request, limit: int = Query(100, ge=1, le=1000)) ->
 @router.get("/backtests")
 def backtests(request: Request) -> dict:
     return _services(request).backtests.list()
+
+
+@router.get("/backtests/{job_id}")
+def backtest_job(job_id: str, request: Request) -> dict:
+    return {"job": _services(request).backtests.get(job_id)}
+
+
+@router.get("/backtests/{job_id}/report")
+def backtest_report(job_id: str, request: Request) -> dict:
+    return _services(request).backtests.report(job_id)

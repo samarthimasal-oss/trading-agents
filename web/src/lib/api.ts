@@ -1,6 +1,8 @@
 import type {
   Account,
   ApiErrorBody,
+  BacktestJob,
+  BacktestJobDetail,
   BacktestsPayload,
   Candle,
   Committee,
@@ -206,6 +208,21 @@ export const api = {
     ),
 
   backtests: () => apiFetch<BacktestsPayload>("/backtests"),
+  startBacktest: (payload: {
+    symbol?: string;
+    bars?: number;
+    folds?: number;
+    holdout?: number;
+    min_test_bars?: number;
+    mc_runs?: number;
+    seed?: number;
+    only?: string | null;
+    no_sensitivity?: boolean;
+  }) => apiFetch<{ job: BacktestJob }>("/backtests", { method: "POST", body: payload }),
+  backtestJob: (id: string) =>
+    apiFetch<BacktestJobDetail>(`/backtests/${encodeURIComponent(id)}`),
+  backtestReport: (id: string) =>
+    apiFetch<Record<string, unknown>>(`/backtests/${encodeURIComponent(id)}/report`),
   learningSummary: () => apiFetch<LearningPayload>("/learning/summary"),
   learningTrades: (limit = 100) =>
     apiFetch<LearningPayload>(`/learning/trades?limit=${limit}`),

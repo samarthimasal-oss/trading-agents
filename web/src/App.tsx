@@ -6,8 +6,9 @@ import { LoginScreen } from "./auth/LoginScreen";
 import { AppShell } from "./components/AppShell";
 import { ToastProvider } from "./components/Toast";
 import { LiveProvider } from "./hooks/useLiveSocket";
-import { ComingSoonPage } from "./pages/ComingSoon";
+import { BacktestingPage } from "./pages/Backtesting";
 import { CommitteePage } from "./pages/Committee";
+import { LearningPage } from "./pages/Learning";
 import { LiveTradingPage } from "./pages/LiveTrading";
 import { MarketIntelligencePage } from "./pages/MarketIntelligence";
 import { OverviewPage } from "./pages/Overview";
@@ -48,8 +49,8 @@ function AuthedApp({ token }: { token: string | null }) {
           <Route path="committee" element={<CommitteePage />} />
           <Route path="strategies" element={<StrategyDeskPage />} />
           <Route path="market" element={<MarketIntelligencePage />} />
-          <Route path="backtests" element={<ComingSoonPage path="/backtests" />} />
-          <Route path="learning" element={<ComingSoonPage path="/learning" />} />
+          <Route path="backtests" element={<BacktestingPage />} />
+          <Route path="learning" element={<LearningPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

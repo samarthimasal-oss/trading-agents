@@ -27,8 +27,8 @@ const NAV = [
   { to: "/committee", label: "AI Committee", icon: Users, ready: true },
   { to: "/strategies", label: "Strategy Desk", icon: SlidersHorizontal, ready: true },
   { to: "/market", label: "Market Intelligence", icon: Radar, ready: true },
-  { to: "/backtests", label: "Backtesting", icon: FlaskConical, ready: false },
-  { to: "/learning", label: "Learning Centre", icon: BrainCircuit, ready: false },
+  { to: "/backtests", label: "Backtesting", icon: FlaskConical, ready: true },
+  { to: "/learning", label: "Learning Centre", icon: BrainCircuit, ready: true },
   { to: "/risk", label: "Risk Centre", icon: ShieldAlert, ready: true },
   { to: "/settings", label: "Settings", icon: Settings, ready: true },
 ];

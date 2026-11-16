@@ -77,8 +77,10 @@ def build_services(settings: ApiSettings | None = None) -> Services:
     market = MarketService(mt5, settings.root, config_loader=config_service.raw)
     committee = CommitteeService(settings.root, config_loader=config_service.raw)
     strategies = StrategiesService(settings.root, config_service, store, mt5=mt5)
-    learning = LearningService(settings.root, journal)
-    backtests = BacktestsService(settings.root, store)
+    learning = LearningService(settings.root, journal, mt5=mt5,
+                               magic=int(trading.get("magic") or 0))
+    backtests = BacktestsService(settings.root, store,
+                                 config_getter=config_service.raw)
 
     return Services(
         settings=settings,
@@ -94,7 +96,7 @@ def build_services(settings: ApiSettings | None = None) -> Services:
         learning=learning,
         backtests=backtests,
         bridge_check=lambda: bridge_check(settings.bridge_host, settings.bridge_port),
-        closeables=[store.close, mt5.shutdown, journal.close],
+        closeables=[store.close, mt5.shutdown, journal.close, backtests.close],
     )
 
 

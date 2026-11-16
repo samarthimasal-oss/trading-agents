@@ -158,6 +158,90 @@ class MT5Client:
         profit += self.account().profit          # floating P/L right now
         return profit
 
+    # ---------------------------------------------------------- closed history
+    def history_positions(self, days: int = 180, magic: Optional[int] = None) -> list[dict]:
+        """Reconstruct closed positions from the terminal's deal history.
+
+        One dict per MT5 ``position_id``.  Only facts the deal record carries
+        are returned: entry/exit aggregation, net P/L and the entry order's
+        SL/TP when it can be matched.  Strategy attribution, spread and the
+        exit reason are NOT in the deal record and are therefore absent.
+        """
+        self.ensure()
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(days=max(1, min(int(days), 365)))
+        deals = mt5.history_deals_get(start, end) or []
+        in_type, out_entries = 0, (1, 2, 3)   # DEAL_ENTRY_IN / OUT, INOUT, OUT_BY
+        groups: dict[int, list] = {}
+        for deal in deals:
+            pid = int(getattr(deal, "position_id", 0) or 0)
+            if pid <= 0:
+                continue
+            if magic is not None and int(getattr(deal, "magic", 0) or 0) != int(magic):
+                continue
+            groups.setdefault(pid, []).append(deal)
+
+        # Entry orders carry the original SL/TP; a position's id is normally
+        # the ticket of its opening order.
+        try:
+            orders = mt5.history_orders_get(start, end) or []
+        except Exception:                                # noqa: BLE001
+            orders = []
+        entry_sl_tp: dict[int, dict] = {}
+        for order in orders:
+            oid = int(getattr(order, "ticket", 0) or 0)
+            pid = int(getattr(order, "position_id", 0) or 0)
+            if pid > 0 and oid == pid and pid not in entry_sl_tp:
+                entry_sl_tp[pid] = {"sl": float(getattr(order, "sl", 0.0) or 0.0),
+                                    "tp": float(getattr(order, "tp", 0.0) or 0.0)}
+
+        rows: list[dict] = []
+        for pid, group in groups.items():
+            entries = [d for d in group if int(getattr(d, "entry", -1)) == in_type]
+            exits = [d for d in group if int(getattr(d, "entry", -1)) in out_entries]
+            if not entries:
+                continue
+
+            def vwap(items) -> float:
+                volume = sum(float(getattr(d, "volume", 0.0) or 0.0) for d in items)
+                if volume <= 0:
+                    return 0.0
+                return sum(float(getattr(d, "price", 0.0) or 0.0)
+                           * float(getattr(d, "volume", 0.0) or 0.0)
+                           for d in items) / volume
+
+            opened = float(sum(float(getattr(d, "volume", 0.0) or 0.0) for d in entries))
+            closed = float(sum(float(getattr(d, "volume", 0.0) or 0.0) for d in exits))
+            net = float(sum(float(getattr(d, "profit", 0.0) or 0.0)
+                            + float(getattr(d, "swap", 0.0) or 0.0)
+                            + float(getattr(d, "commission", 0.0) or 0.0)
+                            + float(getattr(d, "fee", 0.0) or 0.0) for d in group))
+            deal_type = int(getattr(entries[0], "type", -1))
+            open_time = min(int(getattr(d, "time", 0) or 0) for d in entries)
+            close_time = max(int(getattr(d, "time", 0) or 0) for d in exits) if exits else 0
+            if closed < opened - 1e-9:
+                continue                                # partially open: not a closed trade
+            row = {
+                "position_id": pid,
+                "symbol": str(getattr(entries[0], "symbol", "") or ""),
+                "side": "buy" if deal_type == 0 else "sell" if deal_type == 1 else "unknown",
+                "volume": opened,
+                "entry_price": vwap(entries),
+                "exit_price": vwap(exits),
+                "net": net,
+                "open_time": float(open_time),
+                "close_time": float(close_time),
+                "magic": int(getattr(entries[0], "magic", 0) or 0),
+                "comment": str(getattr(entries[0], "comment", "") or ""),
+            }
+            extra = entry_sl_tp.get(pid)
+            if extra:
+                row["sl"] = extra["sl"]
+                row["tp"] = extra["tp"]
+            rows.append(row)
+        rows.sort(key=lambda item: item["close_time"] or item["open_time"], reverse=True)
+        return rows
+
     # -------------------------------------------------------------- position helpers
     def positions(self, symbol: str = None, magic: int = None) -> list:
         self.ensure()

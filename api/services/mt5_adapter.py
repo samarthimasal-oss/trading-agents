@@ -51,6 +51,46 @@ class MT5Adapter:
         with self._lock:
             return float(self.client.daily_bot_profit(self.magic))
 
+    # ----------------------------------------------------------- closed history
+    def closed_positions(self, days: int = 180, magic: int | None = None) -> list[dict]:
+        with self._lock:
+            rows = self.client.history_positions(
+                days=days, magic=self.magic if magic is None else magic)
+        return [
+            {
+                "position_id": int(row.get("position_id", 0) or 0),
+                "symbol": str(row.get("symbol", "") or ""),
+                "side": str(row.get("side", "unknown") or "unknown"),
+                "volume": float(row.get("volume", 0.0) or 0.0),
+                "entry_price": float(row.get("entry_price", 0.0) or 0.0),
+                "exit_price": float(row.get("exit_price", 0.0) or 0.0),
+                "net": float(row.get("net", 0.0) or 0.0),
+                "open_time": float(row.get("open_time", 0.0) or 0.0),
+                "close_time": float(row.get("close_time", 0.0) or 0.0),
+                "magic": int(row.get("magic", 0) or 0),
+                "comment": str(row.get("comment", "") or ""),
+                "sl": float(row.get("sl", 0.0) or 0.0) if "sl" in row else None,
+                "tp": float(row.get("tp", 0.0) or 0.0) if "tp" in row else None,
+            }
+            for row in rows
+        ]
+
+    def symbol_settings(self, symbol: str) -> dict:
+        from core.mt5_client import MT5Client
+
+        with self._lock:
+            resolved = self.client.resolve_symbol(symbol)
+            info = self.client.prepare(resolved)
+            settings = MT5Client.symbol_settings(info)
+        return {
+            "symbol": resolved,
+            "trade_tick_value": float(settings.get("trade_tick_value", 0.0) or 0.0),
+            "trade_tick_size": float(settings.get("trade_tick_size", 0.0) or 0.0),
+            "trade_contract_size": float(settings.get("trade_contract_size", 0.0) or 0.0),
+            "point": float(settings.get("point", 0.0) or 0.0),
+            "digits": int(settings.get("digits", 0) or 0),
+        }
+
     # --------------------------------------------------------------- positions
     def positions(self, symbol: str | None = None,
                   magic: int | None = None) -> list[dict]:
@@ -178,7 +218,7 @@ class UnavailableMT5:
         raise APIError(503, "mt5_unavailable", self.reason)
 
     health = account = positions = orders = quote = candles = _fail
-    daily_bot_profit = close_all = _fail
+    daily_bot_profit = close_all = closed_positions = symbol_settings = _fail
 
     def shutdown(self) -> None:
         return None

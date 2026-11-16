@@ -45,6 +45,18 @@ class StrategyReplay(BaseModel):
     bars: int = Field(1500, ge=320, le=1500)
 
 
+class BacktestStart(BaseModel):
+    symbol: str | None = None
+    bars: int = Field(12000, ge=3000, le=30000)
+    folds: int = Field(4, ge=1, le=8)
+    holdout: float = Field(0.25, ge=0.05, le=0.5)
+    min_test_bars: int = Field(200, ge=50, le=1000)
+    mc_runs: int = Field(2000, ge=0, le=5000)
+    seed: int = Field(42, ge=1, le=2_147_483_647)
+    only: str | None = None
+    no_sensitivity: bool = False
+
+
 @router.get("/runner", dependencies=[Depends(require_auth)])
 def runner_status(request: Request) -> dict:
     return {"runner": _services(request).runner.status()}
@@ -150,3 +162,26 @@ def strategy_signals(payload: StrategyScan, request: Request) -> dict:
 def strategy_replay(payload: StrategyReplay, request: Request) -> dict:
     return _services(request).strategies.replay(
         symbol=payload.symbol, timeframe=payload.timeframe, bars=payload.bars)
+
+
+@router.post("/backtests", dependencies=[Depends(require_auth),
+                                          Depends(require_mutation)])
+def start_backtest(payload: BacktestStart, request: Request) -> dict:
+    services = _services(request)
+    params = {
+        "symbol": payload.symbol,
+        "bars": payload.bars,
+        "folds": payload.folds,
+        "holdout": payload.holdout,
+        "min_test_bars": payload.min_test_bars,
+        "mc_runs": payload.mc_runs,
+        "seed": payload.seed,
+        "only": payload.only,
+        "no_sensitivity": payload.no_sensitivity,
+    }
+
+    def action() -> dict:
+        job = services.backtests.start(params)
+        return {"job": job}
+
+    return run_idempotent(request, "backtest.start", action)

@@ -461,6 +461,32 @@ export interface SettingsPayload {
   meta: { config_path: string; restart_required: boolean; secrets: string };
 }
 
+export interface BacktestMetrics {
+  available: boolean;
+  reason?: string;
+  trades?: number | null;
+  wins?: number | null;
+  losses?: number | null;
+  win_rate?: number | null;
+  total_r?: number | null;
+  expectancy_r?: number | null;
+  profit_factor?: number | null;
+  max_drawdown_r?: number | null;
+  max_consecutive_losses?: number | null;
+  sharpe?: number | null;
+  avg_mfe_r?: number | null;
+  avg_mae_r?: number | null;
+  exit_reasons?: Record<string, number>;
+}
+
+export interface BacktestGate {
+  name?: string;
+  passed?: boolean;
+  skipped?: boolean;
+  detail?: string;
+  status?: string;
+}
+
 export interface BacktestArtifact {
   name: string;
   path: string;
@@ -468,27 +494,101 @@ export interface BacktestArtifact {
   reason?: string;
   created?: number;
   passed?: boolean | null;
-  data_note?: string;
-  oos?: Record<string, unknown>;
-  holdout?: Record<string, unknown>;
-  folds?: Array<Record<string, unknown>>;
-  gates?: Array<{ name: string; passed?: boolean; skipped?: boolean; detail?: string; status?: string }>;
+  data_note?: string | null;
+  oos?: BacktestMetrics;
+  holdout?: BacktestMetrics;
+  folds?: Array<{
+    index?: number | null;
+    test_start?: unknown;
+    test_end?: unknown;
+    metrics: BacktestMetrics;
+  }>;
+  gates?: BacktestGate[];
   gate_counts?: { pass: number; fail: number; skip: number };
+  monte_carlo?: Record<string, unknown> | null;
+  sensitivity?: unknown[] | null;
   config?: Record<string, unknown>;
+  split?: Record<string, unknown>;
+  holdout_window?: Record<string, unknown>;
+}
+
+export interface BacktestJob {
+  id: string;
+  created: number;
+  updated: number;
+  status: string;
+  params?: Record<string, unknown>;
+  pid?: number | null;
+  result_path?: string;
+  log_path?: string;
+  error?: string;
 }
 
 export interface BacktestsPayload {
-  jobs: Array<Record<string, unknown>>;
+  jobs: BacktestJob[];
+  queue?: { queued: number; running: number; cap: number };
   artifacts: BacktestArtifact[];
   available: boolean;
   note: string;
+}
+
+export interface BacktestJobDetail {
+  job: BacktestJob & {
+    artifact?: BacktestArtifact | null;
+    log_tail?: string | null;
+  };
+}
+
+export interface LearningTrade {
+  position_id: number;
+  symbol: string;
+  side: string;
+  volume: number;
+  entry_price: number;
+  exit_price: number;
+  net: number;
+  open_time: number;
+  close_time: number;
+  magic: number;
+  comment?: string;
+  sl?: number | null;
+  tp?: number | null;
+  session: string;
+  is_bot: boolean;
+  realized_r: number | null;
+  risk_basis: string | null;
+  digits?: number | null;
+}
+
+export interface LearningMetrics {
+  closed_trades: number;
+  wins: number;
+  losses: number;
+  win_rate: number | null;
+  total_net: number;
+  avg_r: number | null;
+  r_known: number;
+  sessions: Record<string, number>;
+  symbols: Record<string, number>;
+  bot_trades: number;
+  non_bot_trades: number;
 }
 
 export interface LearningPayload {
   available: boolean;
   reason?: string;
   missing_fields?: string[];
-  trades?: Array<Record<string, unknown>>;
+  data_source?: string;
+  window_days?: number;
+  closed_trades?: number | null;
+  metrics?: LearningMetrics | null;
+  next_step?: string;
+  attribution_note?: string;
+  journal_available?: boolean;
+  note?: string;
+  trades?: LearningTrade[];
+  count?: number;
+  limit?: number;
 }
 
 export interface SystemInfo {

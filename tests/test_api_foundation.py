@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.app import create_app
+from api.errors import APIError
 from api.repository import DashboardStore
 from api.services import ApiSettings, Services
 from api.services.settings_service import SettingsService
@@ -178,8 +179,29 @@ class FakeLearning:
 
 
 class FakeBacktests:
+    def __init__(self):
+        self.started = []
+
     def list(self):
-        return {"jobs": [], "artifacts": []}
+        return {"jobs": [], "artifacts": [], "available": True,
+                "queue": {"queued": 0, "running": 0, "cap": 5},
+                "note": "walk-forward treats the strategy rules as fixed"}
+
+    def start(self, params, actor="local"):
+        self.started.append({"params": params, "actor": actor})
+        return {"id": "bt-test1234", "status": "queued",
+                "params": params, "pid": None}
+
+    def get(self, job_id):
+        if job_id != "bt-test1234":
+            raise APIError(404, "job_not_found", f"no backtest job {job_id!r}")
+        return {"id": job_id, "status": "done", "artifact": {"name": "x.json"},
+                "log_tail": "ok"}
+
+    def report(self, job_id):
+        if job_id != "bt-test1234":
+            raise APIError(404, "job_not_found", f"no backtest job {job_id!r}")
+        return {"passed": False, "gates": []}
 
 
 @pytest.fixture()
@@ -515,6 +537,46 @@ def test_committee_includes_real_journal_reviews(client):
     assert payload["reviews_available"] is True
     assert len(payload["reviews"]) == 1
     assert payload["reviews"][0]["llm_comment"] == "trend supports"
+
+
+def test_backtest_start_requires_mutation_header_and_idempotency(client, services):
+    response = client.post("/api/v1/backtests", headers=AUTH,
+                           json={"symbol": "XAUUSD"})
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "missing_request_header"
+
+    headers = {**MUTATE, "Idempotency-Key": "backtest-1"}
+    first = client.post("/api/v1/backtests", headers=headers,
+                        json={"symbol": "XAUUSD", "bars": 9000})
+    assert first.status_code == 200, first.text
+    job = first.json()["job"]
+    assert job["id"] == "bt-test1234"
+    assert job["status"] == "queued"
+    assert services.backtests.started[0]["params"]["bars"] == 9000
+
+    replay = client.post("/api/v1/backtests", headers=headers,
+                         json={"symbol": "XAUUSD", "bars": 9000})
+    assert replay.status_code == 200
+    assert replay.json().get("replayed") is True
+    assert len(services.backtests.started) == 1
+
+
+def test_backtest_job_detail_and_report_endpoints(client):
+    listing = client.get("/api/v1/backtests", headers=AUTH).json()
+    assert listing["available"] is True
+    assert listing["queue"]["cap"] == 5
+
+    detail = client.get("/api/v1/backtests/bt-test1234", headers=AUTH)
+    assert detail.status_code == 200
+    assert detail.json()["job"]["log_tail"] == "ok"
+
+    report = client.get("/api/v1/backtests/bt-test1234/report", headers=AUTH)
+    assert report.status_code == 200
+    assert report.json()["passed"] is False
+
+    missing = client.get("/api/v1/backtests/bt-nope/report", headers=AUTH)
+    assert missing.status_code == 404
+    assert missing.json()["error"]["code"] == "job_not_found"
 
 
 def test_websocket_requires_auth_then_pushes_a_snapshot(client):

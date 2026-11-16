@@ -117,8 +117,8 @@ python main.py dashboard     # http://127.0.0.1:8766
 
 The bearer token is generated once at `state/dashboard_token.txt`; the startup
 message prints the path, never the value. Paste it into the unlock screen.
-The first slices cover Overview, Risk Centre, Settings, Live Trading, AI
-Committee, Strategy Desk and Market Intelligence:
+All nine pages are live: Overview, Risk Centre, Settings, Live Trading, AI
+Committee, Strategy Desk, Market Intelligence, Backtesting and Learning Centre:
 
 - Overview: equity curve, open positions, runner/bridge/guardian state, committee
   freshness, and journal activity. Empty or stale data is labelled, never
@@ -138,11 +138,20 @@ Committee, Strategy Desk and Market Intelligence:
 - Market Intelligence: timeframe-aware quote/candles/features, spread against
   its configured limit, news calendar windows, and the cached Kronos forecast
   (stale caches are labelled, and a stale or detached path is not drawn).
+- Backtesting: starts real walk-forward runs as queued subprocess jobs
+  (`python main.py walkforward`, one at a time, capped queue, every failure
+  recorded with its log tail) and indexes the resulting JSON artifacts from
+  `docs/reports` and `state/backtests` with gate counts, out-of-sample and
+  untouched-holdout metrics.
+- Learning Centre: closed trades reconstructed from the MT5 deal history of
+  the configured bot magic — entry/exit, net P/L, session, and realized R when
+  the entry order carried a stop. Fields the deal record cannot provide
+  (strategy, MFE/MAE, exit reason, committee reasoning) are listed as honest
+  gaps and rendered as `—`, never inferred.
 
-The console defaults to DRY-RUN and refuses non-loopback binds. Backtesting
-and Learning Centre are marked as upcoming until their real controls are wired.
-API docs live at `/api/docs`; the WebSocket authenticates with the same token
-in its first message.
+The console defaults to DRY-RUN and refuses non-loopback binds. API docs live
+at `/api/docs`; the WebSocket authenticates with the same token in its first
+message.
 
 ## 1. Install
 
