@@ -379,8 +379,12 @@ Verified:
 
 Not yet verified live (open):
 
-- [ ] Clean terminal restart with the socket whitelist persisted. Build 6316
-  requires the host-only `127.0.0.1` row to be re-added after every restart.
+- [ ] Clean terminal restart with the socket whitelist persisted. Unconfirmed:
+  the earlier suspicion that build 6316+ drops the host-only `127.0.0.1` row on
+  restart was traced to dashboard liveness probes being misread as EA dials —
+  no EA has been attached since 2026-11-13, so persistence is still untested.
+  If the first attach after a restart logs a SocketConnect whitelist failure,
+  re-add the row via Tools > Options > Expert Advisors.
 - [ ] Kill Python while a position is open; confirm the EA blocks new entries
   after the grace period and keeps managing SL/TP, breakeven and trailing.
 - [ ] Kill the EA while a position is open; confirm Python stops sending and

@@ -32,6 +32,11 @@ from execution.ea_protocol import (
     token_matches,
 )
 
+# Sentinel returned by _read_line when the peer performed a clean close without
+# sending any data. Dashboard liveness probes dial the bridge port and close
+# without speaking the protocol; that is normal and must not log a warning.
+_CLOSED_BEFORE_HELLO = object()
+
 
 log = logging.getLogger("ea_client")
 
@@ -375,6 +380,13 @@ class EAOrderBridge:
         conn = _Connection(sock=sock, address=address)
         try:
             first = self._read_line(sock, deadline=time.time() + 5.0)
+            if first is _CLOSED_BEFORE_HELLO:
+                # Liveness probes (dashboard health checks) dial the port and
+                # close without speaking the protocol; normal, not an EA fault.
+                self.log.debug(
+                    "Connection from %s closed without hello (liveness probe)",
+                    address)
+                return
             if first is None:
                 self.log.warning("EA connection from %s sent no hello", address)
                 return
@@ -658,7 +670,13 @@ class EAOrderBridge:
                 self.log.exception("stale callback failed")
 
     @staticmethod
-    def _read_line(sock: socket.socket, *, deadline: float) -> Optional[bytes]:
+    def _read_line(sock: socket.socket, *, deadline: float) -> Any:
+        """Read one newline-terminated line before ``deadline``.
+
+        Returns the line bytes, ``None`` on an abnormal end (recv error,
+        oversized frame, deadline reached), or ``_CLOSED_BEFORE_HELLO`` when the
+        peer performed a clean close without sending any data.
+        """
         buffer = b""
         while time.time() < deadline:
             try:
@@ -668,7 +686,7 @@ class EAOrderBridge:
             except OSError:
                 return None
             if not chunk:
-                return None
+                return _CLOSED_BEFORE_HELLO
             buffer += chunk
             if b"\n" in buffer:
                 return buffer.split(b"\n", 1)[0].strip()
