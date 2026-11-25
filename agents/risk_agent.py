@@ -30,6 +30,10 @@ class RiskAgent:
         self._last_entry_time: dict[str, float] = {}
         self._llm_last: dict[str, LlmReview] = {}
 
+    def note_entry(self, symbol: str, when: float | None = None) -> None:
+        """Record a successful entry so the per-symbol cooldown is enforced."""
+        self._last_entry_time[symbol] = float(when if when is not None else time.time())
+
     # ------------------------------------------------------------------ sizing
     def _notional_usd_per_lot(self, symbol: str, info: dict, price: float) -> float:
         """Approximate USD value controlled by 1.0 lot — used by the leverage cap."""
@@ -144,10 +148,22 @@ class RiskAgent:
             round(entry, info["digits"]), round(sl, info["digits"]), round(tp, info["digits"]))
 
         volume = self.size_position(ctx, info, account.equity, atr_val)
-        if review.action == "resize":
-            volume = self._round_volume(max(info["volume_min"], volume *
-                                            min(max(review.size_multiplier, 0.0), 1.0)), info)
-        volume = round(volume * (1.0 if review.approved else 0.0), 3)
+        # Gemini is advisory unless approval is explicitly required.  An
+        # advisory veto must not silently zero a valid trade; an advisory
+        # resize may only reduce size (never below a quarter of the plan and
+        # never to zero).  When approval IS required, a veto blocks the trade.
+        required = bool(self.cfg.get("trading", {}).get("require_llm_approval", False))
+        llm_note = ""
+        if review.action == "resize" and review.approved:
+            mult = min(max(float(review.size_multiplier), 0.0), 1.0)
+            if not required:
+                mult = max(mult, 0.25)
+            volume = self._round_volume(volume * mult, info)
+            llm_note = f" | LLM resize x{mult:.2f}"
+        if required and not review.approved:
+            volume = 0.0
+        elif not required and not review.approved:
+            llm_note = " | advisory LLM veto ignored"
 
         plan = TradePlan(
             symbol=symbol,
@@ -156,7 +172,7 @@ class RiskAgent:
             volume=volume,
             sl=sl, tp=tp, atr=atr_val, entry_hint=entry,
             consensus=consensus, review=review,
-            reason="quant consensus %+.2f | %s" % (consensus.strength,
-                                                   review.comment or "review ok"),
+            reason=("quant consensus %+.2f | %s%s"
+                    % (consensus.strength, review.comment or "review ok", llm_note)),
         )
         return plan

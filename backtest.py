@@ -42,6 +42,7 @@ def fetch_bars_mt5(cfg: dict, symbol: str, bars: int) -> pd.DataFrame:
         symbol = client.resolve_symbol(symbol)
         raw = client.copy_bars(symbol, cfg["trading"]["timeframe"], bars)
         df = to_frame(raw)
+        df = df.iloc[:-1]          # copy_bars includes the forming bar
         df["atr"] = quant.atr(df, cfg["agents"]["atr_period"])
         return df
     finally:
@@ -122,7 +123,12 @@ def run(df: pd.DataFrame, cfg: dict, warmup: int = 120) -> BTResult:
 
         # --- new signal at bar close (indicators are precomputed & causal,
         #     agents only read the last rows, so slicing history is not needed)
-        window = df.iloc[max(0, i - 7): i + 1]      # just enough rows for momentum ROC
+        # Agents must see the same long history the live runner passes
+        # (trading.bars_history, default 300).  A short window silently
+        # disables lookback-dependent agents (breakout needs 26 bars,
+        # pullback needs 223 for the EMA200 slope).  The slice never includes
+        # anything after bar i, so there is no look-ahead.
+        window = df.iloc[max(0, i - 299): i + 1]
         cons = quant.run_quant_agents(window, a)
         r_dist = max(atr_val * sl_mult, 1e-9)
 

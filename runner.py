@@ -204,11 +204,26 @@ class TradingAgentRunner:
                   "spread": None if not quote.valid else round(ctx.spread_points, 1),
                   "quote": quote.as_dict()}
 
+        # every indicator used for sizing/stops must come from the closed bar,
+        # not from the still-forming candle that context_with_indicators saw
+        closed_df = df.iloc[:-1]                      # last CLOSED bar only
+        have_closed = len(closed_df) >= max(
+            a["ema_slow"], a["rsi_period"], a["atr_period"]) + 5
+        if have_closed:
+            quant.apply_closed_indicators(ctx, closed_df)
+            report["atr"] = ctx.atr
+
         # ---- position maintenance (every poll)
+        # A quarantined/absurd quote must not drive trailing/breakeven
+        # distances; broker-side SL/TP protect the position until the feed
+        # recovers, and the next poll resumes management.
         try:
-            changes = self.executor.manage(ctx)
-            if changes:
-                report["sl_changes"] = changes
+            if quote.valid:
+                changes = self.executor.manage(ctx)
+                if changes:
+                    report["sl_changes"] = changes
+            else:
+                report["manage_skipped"] = "quote quarantined"
         except MT5Error as exc:
             report["manage_error"] = str(exc)
 
@@ -229,15 +244,9 @@ class TradingAgentRunner:
         report["action"] = ""                         # clear stale per-bar labels
         report["why"] = ""
 
-        closed_df = df.iloc[:-1]                      # last CLOSED bar only
-        if len(closed_df) < max(a["ema_slow"], a["rsi_period"], a["atr_period"]) + 5:
+        if not have_closed:
             report["why"] = "not enough bars"
             return report
-
-        # every indicator used for sizing/stops must come from the closed bar,
-        # not from the still-forming candle that context_with_indicators saw
-        quant.apply_closed_indicators(ctx, closed_df)
-        report["atr"] = ctx.atr
 
         # a quarantined feed may still be managed (executor has its own quote
         # guard) but it must never open new risk
@@ -284,7 +293,7 @@ class TradingAgentRunner:
                 log.info("kronos_agent imported from %s", kronos_agent.__file__)
             k_sig = kronos_agent.forecast_signal(
                 symbol, closed_df, self.kronos_cfg, atr_now,
-                float(a.get("weight_kronos", 1.1)))
+                float(a.get("weight_kronos", 1.1)), runs=self.kronos_runs)
             payload = getattr(k_sig, "payload", None) or {}
             report["forecast"] = payload or None
             if payload:
@@ -425,13 +434,28 @@ class TradingAgentRunner:
         if report.get("forecast"):
             proposal["kronos_forecast"] = report["forecast"].get("summary")
         review = self.llm.review(ctx, consensus, account, positions, proposal)
+        required = bool(t.get("require_llm_approval", False))
         report["llm"] = {"used": review.used_llm, "action": review.action,
-                         "comment": review.comment}
-        if not review.approved and t.get("require_llm_approval", False):
+                         "comment": review.comment, "enforced": required}
+        if required and not review.used_llm:
+            # fail-safe: mandatory approval cannot be bypassed because the
+            # provider is disabled, rate-limited or unreachable
+            report["action"] = "blocked"
+            report["why"] = "LLM approval required but unavailable"
+            self._record(symbol, "blocked", None, consensus, review,
+                         report["why"], False)
+            return report
+        if required and not review.approved:
             report["action"] = "vetoed-by-llm"
             self._record(symbol, "vetoed", None, consensus, review,
                          review.comment or "LLM veto", False)
             return report
+        if not required and not review.approved:
+            # advisory mode: the review is displayed and journaled, but a
+            # veto cannot block an otherwise valid quant trade
+            report["llm"]["advisory_veto"] = True
+            log.info("%s: advisory LLM veto ignored (approval not required): %s",
+                     symbol, review.comment)
 
         # ---- risk sizing + execution
         plan = self.risk.build_plan(ctx, closed_df, a, consensus, review, account,
@@ -444,8 +468,11 @@ class TradingAgentRunner:
             else:
                 executed = self.executor.place(plan)
                 report["action"] = plan.action if executed else "order-failed"
+                if executed:
+                    self.risk.note_entry(symbol)
         else:
             report["action"] = "skipped (zero volume)"
+            report["why"] = plan.reason or "zero volume after risk/LLM review"
         report["plan"] = {"volume": plan.volume, "sl": plan.sl, "tp": plan.tp}
         self._record(symbol, plan.action, plan, consensus, review,
                      plan.reason or "generated", executed)

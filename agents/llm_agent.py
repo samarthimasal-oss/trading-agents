@@ -61,7 +61,7 @@ class LlmAgent:
         self.timeout = float(llm_cfg.get("timeout_seconds") or 25)
         self.min_interval = float(llm_cfg.get("min_seconds_between_reviews") or 60)
         self.key = load_api_key(llm_cfg)
-        self._last_call = 0.0
+        self._last_call: dict[str, float] = {}
         if self.enabled and not self.key:
             log.warning("LLM agent enabled but no Gemini key found -> quant-only mode.")
             self.enabled = False
@@ -99,7 +99,8 @@ class LlmAgent:
                              comment="quant-only (LLM disabled)", used_llm=False)
 
         now_ts = now_ts if now_ts is not None else time.time()
-        if now_ts - self._last_call < self.min_interval:
+        last = self._last_call.get(ctx.symbol, 0.0)
+        if now_ts - last < self.min_interval:
             return LlmReview(approved=True, action="approve",
                              comment="rate-limited; skipping review", used_llm=False)
 
@@ -131,7 +132,7 @@ class LlmAgent:
             }
 
             review = self._ask(payload)
-            self._last_call = now_ts
+            self._last_call[ctx.symbol] = now_ts
             return review
         except Exception as exc:
             log.warning("LLM review failed (%s) -> proceeding quant-only", exc)
@@ -171,8 +172,12 @@ class LlmAgent:
             .get("parts", [{}])[0].get("text", "")
         parsed = json.loads(text)
         action = str(parsed.get("action", "approve")).lower().strip()
-        mult = float(parsed.get("size_multiplier", 1.0) or 1.0)
-        mult = min(max(mult, 0.0), 1.5)
+        raw_mult = parsed.get("size_multiplier", 1.0)
+        try:
+            mult = 1.0 if raw_mult is None else float(raw_mult)
+        except (TypeError, ValueError):
+            mult = 1.0
+        mult = min(max(mult, 0.0), 1.0)   # the LLM can never *increase* risk
         if action == "veto":
             return LlmReview(False, "veto", 0.0, str(parsed.get("comment", "")), True)
         if action == "resize":
