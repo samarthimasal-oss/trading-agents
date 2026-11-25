@@ -591,6 +591,58 @@ export interface LearningPayload {
   limit?: number;
 }
 
+export interface FunnelStage {
+  key: string;
+  label: string;
+  reached: number;
+  passed: number;
+  rejected: number;
+  skipped: number;
+  outcomes: Record<string, number>;
+  available?: boolean;
+  reason?: string;
+  win_rate?: number | null;
+  net?: number;
+}
+
+export interface FunnelRejection {
+  stage: string;
+  reason: string;
+  count: number;
+}
+
+export interface FunnelSymbol {
+  symbol: string;
+  signals: number;
+  executed: number;
+  rejected: number;
+  closed: number;
+}
+
+export interface FunnelOrders {
+  filled: number;
+  rejected: number;
+  closed: number;
+  partial_closes: number;
+  sl_modified: number;
+}
+
+export interface FunnelPayload {
+  available: boolean;
+  generated_at: number;
+  window_hours: number;
+  since: number;
+  symbol?: string | null;
+  latest_ts?: number | null;
+  evaluations: number;
+  stages: FunnelStage[];
+  rejections: FunnelRejection[];
+  by_symbol: FunnelSymbol[];
+  orders: FunnelOrders;
+  note: string;
+  cached?: boolean;
+}
+
 export interface SystemInfo {
   python: string;
   platform: string;

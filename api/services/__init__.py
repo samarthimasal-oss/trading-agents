@@ -90,6 +90,7 @@ class Services:
     learning: Any
     backtests: Any
     bridge_check: Callable[[], dict]
+    funnel: Any = None
     clock: Callable[[], float] = time.time
     started_at: float = field(default_factory=time.time)
     closeables: list[Callable[[], None]] = field(default_factory=list)

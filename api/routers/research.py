@@ -65,6 +65,19 @@ def committee(request: Request) -> dict:
     return payload
 
 
+@router.get("/funnel")
+def funnel(request: Request, hours: int = Query(24, ge=1, le=720),
+           symbol: str | None = Query(None, min_length=1)) -> dict:
+    """Real-data conversion funnel: signals → agents → Kronos → Gemini → risk
+    → execution → closed trades, with the recorded rejection reasons."""
+    services = _services(request)
+    service = services.funnel
+    if service is None:                 # tests / older wiring: build on demand
+        from api.services.funnel_service import FunnelService
+        service = FunnelService(services.journal, services.mt5)
+    return service.snapshot(hours=hours, symbol=symbol)
+
+
 @router.get("/learning/summary")
 def learning_summary(request: Request) -> dict:
     return _services(request).learning.summary()

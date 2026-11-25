@@ -212,6 +212,8 @@ class TradingAgentRunner:
         if have_closed:
             quant.apply_closed_indicators(ctx, closed_df)
             report["atr"] = ctx.atr
+        bar_ts = (float(closed_df.index[-1].timestamp())
+                  if have_closed and len(closed_df) else 0.0)
 
         # ---- position maintenance (every poll)
         # A quarantined/absurd quote must not drive trailing/breakeven
@@ -257,6 +259,8 @@ class TradingAgentRunner:
             report["why"] = f"quote quarantined: {quote.reason}"
             self._record(symbol, "blocked", None, consensus, None,
                          report["why"], False)
+            self._eval(symbol, "signal", "reject", reason=report["why"],
+                       bar_time=bar_ts)
             return report
 
         # ---- grade the previous closed-bar forecast against this new bar
@@ -282,10 +286,14 @@ class TradingAgentRunner:
                              f"{atr_ratio:.0%} of 96-bar median")
             self._record(symbol, "blocked", None, consensus, None,
                          report["why"], False)
+            self._eval(symbol, "signal", "reject", reason=report["why"],
+                       bar_time=bar_ts)
             return report
 
         # ---- agent votes: 5 quant strategies + Kronos foundation-model forecast
         signals = [ag.analyze(closed_df, a) for ag in quant.AGENTS]
+        self._eval(symbol, "agents", "pass", bar_time=bar_ts,
+                   detail=",".join(f"{s.name}:{s.direction}" for s in signals))
         report["forecast"] = None
         if self.kronos_cfg.get("enabled", True):
             if not getattr(self, "_kronos_src_logged", False):
@@ -301,7 +309,15 @@ class TradingAgentRunner:
             if k_sig.direction or payload:
                 log.info("Kronos %s: dir=%d conf=%.2f | %s", symbol, k_sig.direction,
                          k_sig.confidence, payload.get("summary", k_sig.reason))
+            self._eval(symbol, "kronos", "pass" if payload else "skip",
+                       reason="" if payload else (k_sig.reason or "no forecast"),
+                       direction=k_sig.direction, confidence=k_sig.confidence,
+                       bar_time=bar_ts,
+                       detail=str(payload.get("summary") or "")[:300])
             signals.append(k_sig)
+        else:
+            self._eval(symbol, "kronos", "skip", reason="Kronos disabled",
+                       bar_time=bar_ts)
         consensus = quant.build_consensus(signals, a["consensus_threshold"])
         # ---- higher-timeframe confluence: H1/H4 forecasts known at this very
         # moment nudge the M15 consensus (§ htf_confluence). Support strengthens,
@@ -340,6 +356,15 @@ class TradingAgentRunner:
                 log.info("HTF confluence %s: %d votes net %+.0f → strength %.2f → %.2f%s",
                          symbol, len(votes), net, before, new_strength,
                          " (direction dropped)" if new_dir == 0 else "")
+
+        self._eval(
+            symbol, "signal",
+            "pass" if consensus.direction != 0 else "reject",
+            reason=("" if consensus.direction != 0 else
+                    f"no consensus (strength {consensus.strength:+.2f})"),
+            direction=consensus.direction, confidence=consensus.confidence,
+            bar_time=bar_ts,
+            detail=f"strength={consensus.strength:.3f}")
 
         positions = self.executor.bot_positions()
 
@@ -414,6 +439,9 @@ class TradingAgentRunner:
             report["action"] = "blocked"
             report["why"] = news_why
             self._record(symbol, "blocked", None, consensus, None, news_why, False)
+            self._eval(symbol, "risk", "reject", reason=news_why,
+                       direction=consensus.direction,
+                       confidence=consensus.confidence, bar_time=bar_ts)
             return report
 
         gate = self.risk.pre_trade_gate(ctx, account, positions)
@@ -421,6 +449,9 @@ class TradingAgentRunner:
             report["action"] = "blocked"
             report["why"] = gate.reason
             self._record(symbol, "blocked", None, consensus, None, gate.reason, False)
+            self._eval(symbol, "risk", "reject", reason=gate.reason,
+                       direction=consensus.direction,
+                       confidence=consensus.confidence, bar_time=bar_ts)
             return report
 
         # ---- AI committee review
@@ -437,6 +468,18 @@ class TradingAgentRunner:
         required = bool(t.get("require_llm_approval", False))
         report["llm"] = {"used": review.used_llm, "action": review.action,
                          "comment": review.comment, "enforced": required}
+        if not review.used_llm:
+            gemini_outcome, gemini_why = "skip", (review.comment or review.error
+                                                  or "LLM unavailable")
+        elif not review.approved:
+            gemini_outcome = "reject" if required else "advisory"
+            gemini_why = review.comment or ("veto" if required else
+                                            "advisory veto ignored")
+        else:
+            gemini_outcome, gemini_why = "pass", (review.comment or "")
+        self._eval(symbol, "gemini", gemini_outcome, reason=gemini_why,
+                   direction=consensus.direction, confidence=consensus.confidence,
+                   bar_time=bar_ts, detail=review.action)
         if required and not review.used_llm:
             # fail-safe: mandatory approval cannot be bypassed because the
             # provider is disabled, rate-limited or unreachable
@@ -460,16 +503,38 @@ class TradingAgentRunner:
         # ---- risk sizing + execution
         plan = self.risk.build_plan(ctx, closed_df, a, consensus, review, account,
                                     atr=atr_now)
+        tradeable = plan.action in ("buy", "sell") and plan.volume > 0
+        self._eval(
+            symbol, "risk", "pass" if tradeable else "reject",
+            reason=("" if tradeable else (plan.reason or "no tradeable size")),
+            direction=consensus.direction, confidence=consensus.confidence,
+            bar_time=bar_ts,
+            detail=f"volume={plan.volume:g} sl={plan.sl} tp={plan.tp}")
         executed = False
-        if plan.action in ("buy", "sell") and plan.volume > 0:
+        if tradeable:
             if self.dry_run:
                 log.info("DRY-RUN plan: %s", plan.summary())
                 report["action"] = f"dry-run {plan.action}"
+                self._eval(symbol, "execution", "skip", reason="dry run",
+                           direction=plan.direction, confidence=consensus.confidence,
+                           bar_time=bar_ts, detail=plan.summary())
             else:
                 executed = self.executor.place(plan)
                 report["action"] = plan.action if executed else "order-failed"
+                last = getattr(self.executor, "last_order", {}) or {}
                 if executed:
                     self.risk.note_entry(symbol)
+                    self._eval(
+                        symbol, "execution", "filled", direction=plan.direction,
+                        confidence=consensus.confidence, bar_time=bar_ts,
+                        detail=str(last.get("detail") or plan.summary()))
+                else:
+                    self._eval(
+                        symbol, "execution", "reject",
+                        reason=str(last.get("detail") or "order failed"),
+                        direction=plan.direction,
+                        confidence=consensus.confidence, bar_time=bar_ts,
+                        detail=str(last.get("kind") or ""))
         else:
             report["action"] = "skipped (zero volume)"
             report["why"] = plan.reason or "zero volume after risk/LLM review"
@@ -605,6 +670,17 @@ class TradingAgentRunner:
             log.exception("live board write failed")
 
     # ------------------------------------------------------------------ journal
+    def _eval(self, symbol, stage, outcome, *, reason="", direction=0,
+              confidence=0.0, bar_time=0.0, detail=""):
+        """Write one funnel stage row; never let analytics break trading."""
+        try:
+            self.store.evaluation(symbol=symbol, stage=stage, outcome=outcome,
+                                  reason=reason, direction=direction,
+                                  confidence=confidence, bar_time=bar_time,
+                                  detail=detail)
+        except Exception:                            # noqa: BLE001
+            log.debug("funnel evaluation write failed", exc_info=True)
+
     def _record(self, symbol, action, plan, consensus, review, reason, executed):
         try:
             self.store.decision(

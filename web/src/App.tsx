@@ -8,6 +8,7 @@ import { ToastProvider } from "./components/Toast";
 import { LiveProvider } from "./hooks/useLiveSocket";
 import { BacktestingPage } from "./pages/Backtesting";
 import { CommitteePage } from "./pages/Committee";
+import { FunnelPage } from "./pages/Funnel";
 import { LearningPage } from "./pages/Learning";
 import { LiveTradingPage } from "./pages/LiveTrading";
 import { MarketIntelligencePage } from "./pages/MarketIntelligence";
@@ -51,6 +52,7 @@ function AuthedApp({ token }: { token: string | null }) {
           <Route path="market" element={<MarketIntelligencePage />} />
           <Route path="backtests" element={<BacktestingPage />} />
           <Route path="learning" element={<LearningPage />} />
+          <Route path="funnel" element={<FunnelPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

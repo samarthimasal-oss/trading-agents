@@ -16,6 +16,7 @@ from api.services import ApiSettings, Services
 from api.services.backtests_service import BacktestsService
 from api.services.bridge import bridge_check
 from api.services.committee_service import CommitteeService
+from api.services.funnel_service import FunnelService
 from api.services.guardian_writer import GuardianWriter
 from api.services.journal_adapter import JournalAdapter
 from api.services.learning_service import LearningService
@@ -81,6 +82,8 @@ def build_services(settings: ApiSettings | None = None) -> Services:
                                magic=int(trading.get("magic") or 0))
     backtests = BacktestsService(settings.root, store,
                                  config_getter=config_service.raw)
+    funnel = FunnelService(journal, mt5,
+                           magic=int(trading.get("magic") or 0))
 
     return Services(
         settings=settings,
@@ -96,6 +99,7 @@ def build_services(settings: ApiSettings | None = None) -> Services:
         learning=learning,
         backtests=backtests,
         bridge_check=lambda: bridge_check(settings.bridge_host, settings.bridge_port),
+        funnel=funnel,
         closeables=[store.close, mt5.shutdown, journal.close, backtests.close],
     )
 

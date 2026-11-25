@@ -16,6 +16,10 @@ CREATE TABLE IF NOT EXISTS decisions (
 CREATE TABLE IF NOT EXISTS events (
   ts REAL, kind TEXT, symbol TEXT, detail TEXT, retcode INTEGER, price REAL, volume REAL
 );
+CREATE TABLE IF NOT EXISTS evaluations (
+  ts REAL, bar_time REAL, symbol TEXT, stage TEXT, outcome TEXT,
+  reason TEXT, direction INTEGER, confidence REAL, detail TEXT
+);
 CREATE TABLE IF NOT EXISTS equity_log (
   ts REAL, equity REAL, balance REAL, margin REAL, floating REAL
 );
@@ -29,6 +33,10 @@ CREATE TABLE IF NOT EXISTS guardian_state (
   updated REAL
 );
 CREATE INDEX IF NOT EXISTS idx_decisions_ts ON decisions(ts);
+CREATE INDEX IF NOT EXISTS idx_evaluations_ts ON evaluations(ts);
+CREATE INDEX IF NOT EXISTS idx_evaluations_stage ON evaluations(stage, ts);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_evaluations_bar
+  ON evaluations(bar_time, symbol, stage);
 """
 
 
@@ -70,6 +78,25 @@ class StateStore:
         )
         self.db.commit()
 
+    def evaluation(self, *, stage: str, outcome: str, symbol: str = "",
+                   reason: str = "", direction: int = 0, confidence: float = 0.0,
+                   bar_time: float = 0.0, detail: str = ""):
+        """Record one funnel stage transition for a symbol/bar.
+
+        Exactly one row per stage per closed bar lets the dashboard count how
+        many candidates reached each gate and why the rest stopped, without
+        inferring anything from price data.
+        """
+        self.db.execute(
+            "INSERT OR REPLACE INTO evaluations "
+            "(ts, bar_time, symbol, stage, outcome, reason, direction, "
+            " confidence, detail) VALUES (?,?,?,?,?,?,?,?,?)",
+            (time.time(), float(bar_time or 0.0), symbol, str(stage),
+             str(outcome), str(reason or "")[:500], int(direction or 0),
+             float(confidence or 0.0), str(detail or "")[:2000]),
+        )
+        self.db.commit()
+
     def equity(self, equity: float, balance: float, margin: float, floating: float):
         self.db.execute(
             "INSERT INTO equity_log VALUES (?,?,?,?,?)",
@@ -104,6 +131,24 @@ class StateStore:
             (kind, f"%{detail_contains}%"),
         )
         return cur.fetchone() is not None
+
+    def evaluations(self, limit: int = 200, since: float | None = None,
+                    symbol: str | None = None) -> list[dict]:
+        clauses: list[str] = []
+        params: list = []
+        if since is not None:
+            clauses.append("ts >= ?")
+            params.append(float(since))
+        if symbol:
+            clauses.append("symbol = ?")
+            params.append(symbol.upper())
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(max(1, min(int(limit), 5000)))
+        cur = self.db.execute(
+            f"SELECT * FROM evaluations {where} ORDER BY ts DESC, rowid DESC LIMIT ?",
+            tuple(params))
+        cur.row_factory = sqlite3.Row
+        return [dict(row) for row in cur.fetchall()]
 
     # ------------------------------------------------------------ guardian
     def guardian_state(self) -> dict | None:

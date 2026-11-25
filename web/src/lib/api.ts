@@ -8,6 +8,7 @@ import type {
   Committee,
   Decision,
   EquityPoint,
+  FunnelPayload,
   Health,
   JournalEvent,
   LearningPayload,
@@ -223,6 +224,10 @@ export const api = {
     apiFetch<BacktestJobDetail>(`/backtests/${encodeURIComponent(id)}`),
   backtestReport: (id: string) =>
     apiFetch<Record<string, unknown>>(`/backtests/${encodeURIComponent(id)}/report`),
+  funnel: (hours = 24, symbol?: string) =>
+    apiFetch<FunnelPayload>(
+      `/funnel?hours=${hours}${symbol ? `&symbol=${encodeURIComponent(symbol)}` : ""}`,
+    ),
   learningSummary: () => apiFetch<LearningPayload>("/learning/summary"),
   learningTrades: (limit = 100) =>
     apiFetch<LearningPayload>(`/learning/trades?limit=${limit}`),

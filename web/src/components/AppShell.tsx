@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   Activity,
   BrainCircuit,
+  Filter,
   FlaskConical,
   LayoutDashboard,
   LogOut,
@@ -29,6 +30,7 @@ const NAV = [
   { to: "/market", label: "Market Intelligence", icon: Radar, ready: true },
   { to: "/backtests", label: "Backtesting", icon: FlaskConical, ready: true },
   { to: "/learning", label: "Learning Centre", icon: BrainCircuit, ready: true },
+  { to: "/funnel", label: "Signal Funnel", icon: Filter, ready: true },
   { to: "/risk", label: "Risk Centre", icon: ShieldAlert, ready: true },
   { to: "/settings", label: "Settings", icon: Settings, ready: true },
 ];
@@ -41,6 +43,7 @@ const TITLES: Record<string, { title: string; eyebrow: string }> = {
   "/market": { title: "Market Intelligence", eyebrow: "Context" },
   "/backtests": { title: "Backtesting", eyebrow: "Validation" },
   "/learning": { title: "Learning Centre", eyebrow: "Post-trade" },
+  "/funnel": { title: "Signal Funnel", eyebrow: "Conversion" },
   "/risk": { title: "Risk Centre", eyebrow: "Governor" },
   "/settings": { title: "Settings", eyebrow: "Configuration" },
 };
