@@ -45,6 +45,8 @@ class AccountSnapshot:
     profit: float = 0.0            # floating P/L of all positions
     daily_pnl: float = 0.0         # P/L of bot-closed trades today + floating
     currency: str = "USD"
+    trade_allowed: bool = True     # account-level trading permission
+    trade_mode: int = 0            # 0 demo, 1 contest, 2 real
 
 
 @dataclass

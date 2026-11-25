@@ -45,12 +45,15 @@ class Guardian:
             return
         if not state:
             return
+        previous_halt = self._halted_day
         self._last_day = state.get("day")
         self.day_start_equity = state.get("day_start_equity")
         self._halted_day = state.get("halted_day")
         self._halt_reason = state.get("halt_reason") or ""
         self._halted_at = state.get("halted_at")
-        if self._halted_day:
+        # a dashboard/API reset writes the DB directly; reload silently so the
+        # running supervisor notices it on the next poll
+        if self._halted_day and self._halted_day != previous_halt:
             log.warning("Guardian restored lockout for %s: %s",
                         self._halted_day, self._halt_reason or "risk limit")
 
@@ -89,10 +92,16 @@ class Guardian:
         """Returns (trading_allowed, reason, flatten_requested)."""
         from core.mt5_client import MT5Error
 
+        # pick up a manual reset / persisted lockout written by the API
+        self._load_state()
+
         try:
             acc = self.client.account()
         except MT5Error as e:
-            return True, f"account snapshot unavailable ({e})", False
+            # fail CLOSED: without an account snapshot the hard limits cannot
+            # be evaluated, so no new risk may be opened (positions keep their
+            # broker-side SL/TP and are not flushed on a transient read error)
+            return False, f"account snapshot unavailable ({e}); entries paused", False
 
         # roll the day and expire yesterday's lockout
         today = self.utc_day()
@@ -131,9 +140,13 @@ class Guardian:
             self._lockout_until_tomorrow(why)
             return False, why, True
 
-        # 3) daily loss limit (bot trades: realized today + floating)
+        # 3) daily loss limit (bot trades only: realized today + floating)
         if self.magic:
-            daily = self.client.daily_bot_profit(self.magic)
+            try:
+                daily = self.client.daily_bot_profit(self.magic)
+            except Exception as exc:                  # noqa: BLE001
+                return (False,
+                        f"daily P/L unavailable ({exc}); entries paused", False)
             limit = float(self.risk_cfg["max_daily_loss_percent"]) / 100.0 * day_start
             if daily <= -limit:
                 why = (f"today's bot P/L {daily:.2f} breaches daily limit "

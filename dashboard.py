@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
 import subprocess
 import sys
@@ -310,10 +311,22 @@ def trade_plans(mt5_state: dict, live: dict) -> list[dict]:
             sl = entry - stop if row["dir"] > 0 else entry + stop
             tp = entry + tp_dist if row["dir"] > 0 else entry - tp_dist
 
-            # position size — same maths as RiskAgent.size_position
-            ticks = stop / s["trade_tick_size"]
-            loss_per_lot = ticks * s["trade_tick_value"]
-            vol = (risk_usd / loss_per_lot) if loss_per_lot > 0 else s["volume_min"]
+            # position size — same rules as RiskAgent: broker profit math,
+            # floor to the step, reject when the minimum lot is over budget
+            loss_per_lot = None
+            calc = getattr(c, "profit_if_closed", None)
+            if callable(calc):
+                try:
+                    pnl = calc(sym, "buy" if row["dir"] > 0 else "sell",
+                               1.0, entry, sl)
+                except Exception:                    # noqa: BLE001
+                    pnl = None
+                if pnl is not None and float(pnl) < 0:
+                    loss_per_lot = abs(float(pnl))
+            if not loss_per_lot:
+                ticks = stop / s["trade_tick_size"]
+                loss_per_lot = ticks * s["trade_tick_value"]
+            vol = (risk_usd / loss_per_lot) if loss_per_lot > 0 else 0.0
             if lev_cap > 0 and equity > 0:
                 cs = float(s.get("trade_contract_size") or 0.0)
                 sym_u = sym.upper()
@@ -326,9 +339,9 @@ def trade_plans(mt5_state: dict, live: dict) -> list[dict]:
                 if notional > 0:
                     vol = min(vol, equity * lev_cap / notional)
             step = s["volume_step"] or 0.01
-            vol = int(vol / step) * step
-            vol = max(s["volume_min"], min(s["volume_max"], vol))
-            vol = round(vol, 3)
+            vol = math.floor(vol / step + 1e-9) * step
+            vol = min(vol, s["volume_max"])
+            vol = round(vol, 3) if vol >= s["volume_min"] - 1e-9 else 0.0
 
             spread = float(quote_spread or 0.0)
             if not (0 <= spread <= 1000):

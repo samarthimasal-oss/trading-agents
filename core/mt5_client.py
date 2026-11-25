@@ -142,21 +142,94 @@ class MT5Client:
             login=a.login, balance=a.balance, equity=a.equity, margin=a.margin,
             free_margin=a.margin_free, margin_level=a.margin_level, profit=a.profit,
             currency=a.currency,
+            trade_allowed=bool(getattr(a, "trade_allowed", True)),
+            trade_mode=int(getattr(a, "trade_mode", 0) or 0),
         )
 
     def daily_bot_profit(self, magic: int) -> float:
-        """Realized P/L of the bot's closed deals today (UTC) + current floating P/L."""
+        """Realized P/L of the bot's deals today (UTC) + the bot's floating P/L.
+
+        Only deals/positions carrying ``magic`` are counted: an account-wide
+        floating figure would make manual trades trip the bot's daily limit.
+        Entry commissions are included (they are charged on the opening deal
+        and were previously dropped), so the number matches the account
+        statement as closely as MT5 exposes it.
+        """
         self.ensure()
         start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
         deals = mt5.history_deals_get(start, datetime.now(timezone.utc)) or []
         profit = 0.0
         for d in deals:
-            if d.magic != magic:
+            if int(getattr(d, "magic", 0) or 0) != int(magic):
                 continue
-            if d.entry in (mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_OUT_BY):
-                profit += d.profit + d.swap + d.commission
-        profit += self.account().profit          # floating P/L right now
+            entry = int(getattr(d, "entry", -1))
+            commission = float(getattr(d, "commission", 0.0) or 0.0)
+            fee = float(getattr(d, "fee", 0.0) or 0.0)
+            if entry in (mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_OUT_BY):
+                profit += (float(getattr(d, "profit", 0.0) or 0.0)
+                           + float(getattr(d, "swap", 0.0) or 0.0)
+                           + commission + fee)
+            elif entry == mt5.DEAL_ENTRY_IN:
+                # commission on the opening deal (profit is normally zero)
+                profit += commission + fee
+        for pos in self.positions(magic=magic):
+            profit += (float(getattr(pos, "profit", 0.0) or 0.0)
+                       + float(getattr(pos, "swap", 0.0) or 0.0))
         return profit
+
+    # -------------------------------------------------------- broker calculators
+    def profit_if_closed(self, symbol: str, side: str, volume: float,
+                         price_open: float, price_close: float) -> Optional[float]:
+        """Broker-computed P/L (account currency) or ``None`` if unavailable.
+
+        This is the authoritative conversion from a price stop distance to
+        money: contract size, tick value and currency conversion all come from
+        the terminal instead of being guessed from the symbol name.
+        """
+        self.ensure()
+        order_type = (mt5.ORDER_TYPE_BUY if str(side).lower() == "buy"
+                      else mt5.ORDER_TYPE_SELL)
+        try:
+            value = mt5.order_calc_profit(order_type, symbol, float(volume),
+                                          float(price_open), float(price_close))
+        except Exception as exc:                          # noqa: BLE001
+            log.debug("order_calc_profit unavailable for %s: %s", symbol, exc)
+            return None
+        return None if value is None else float(value)
+
+    def margin_required(self, symbol: str, side: str, volume: float,
+                        price: float) -> Optional[float]:
+        """Broker-computed margin for ``volume`` lots or ``None`` if unavailable."""
+        self.ensure()
+        order_type = (mt5.ORDER_TYPE_BUY if str(side).lower() == "buy"
+                      else mt5.ORDER_TYPE_SELL)
+        try:
+            value = mt5.order_calc_margin(order_type, symbol, float(volume),
+                                          float(price))
+        except Exception as exc:                          # noqa: BLE001
+            log.debug("order_calc_margin unavailable for %s: %s", symbol, exc)
+            return None
+        return None if value is None else float(value)
+
+    def modify_position(self, ticket: int, symbol: str, sl: float, tp: float,
+                        magic: Optional[int] = None) -> dict:
+        """Modify SL/TP through the terminal and return the broker retcode."""
+        self.ensure()
+        request = {
+            "action": mt5.TRADE_ACTION_SLTP,
+            "position": int(ticket),
+            "symbol": symbol,
+            "sl": float(sl),
+            "tp": float(tp),
+        }
+        if magic is not None:
+            request["magic"] = int(magic)
+        result = mt5.order_send(request)
+        if result is None:
+            raise MT5Error(f"order_send(SLTP #{ticket}) failed: {mt5.last_error()}")
+        return {"retcode": int(result.retcode),
+                "comment": str(getattr(result, "comment", "") or ""),
+                "request": request}
 
     # ---------------------------------------------------------- closed history
     def history_positions(self, days: int = 180, magic: Optional[int] = None) -> list[dict]:
