@@ -41,38 +41,45 @@ DEAD_MARKET = [0.62, 0.75]
 
 
 def simulate_variant(cache: dict, info: dict, cfg: dict, weights: dict,
-                     threshold: float, dead: float, start: int, end: int) -> dict:
-    cfg_local = dict(cfg)
-    cfg_local["risk"] = {**cfg["risk"], "_symbol": os.path.basename("")}
-    res = bt.replay(cache["df"], info, cfg_local, cache["votes"], cache["confs"],
+                     threshold: float, dead: float, start: int, end: int,
+                     symbol: str) -> dict:
+    res = bt.replay(cache["df"], info, cfg, cache["votes"], cache["confs"],
                     cache["agents"], weights, threshold, dead_market_ratio=dead,
-                    start=start, end=end)
-    m = bt.metrics(res["trades"], res["curve"])
+                    start=start, end=end, symbol=symbol,
+                    timeframe=cache.get("timeframe", "M15"))
+    m = bt.metrics(res["trades"], res["curve"],
+                   timeframe=cache.get("timeframe", "M15"),
+                   start_equity=res.get("start_equity"))
     return {"m": m, "res": res}
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=80)
+    ap.add_argument("--timeframe", type=str, default=None,
+                    help="default: trading.timeframe from config")
     ap.add_argument("--apply", action="store_true", help="write winner into config.json")
     args = ap.parse_args()
 
     cfg = json.load(open(os.path.join(ROOT, "config.json"), encoding="utf-8"))
     symbols = [s.strip() for s in cfg["trading"]["symbols"]]
+    timeframe = str(args.timeframe or cfg["trading"].get("timeframe") or "M15").upper()
 
     caches = {}
     for s in symbols:
         try:
-            caches[s] = bt.load_signals(s)
+            caches[s] = bt.load_signals(s, timeframe=timeframe)
         except SystemExit:
-            print(f"building signal cache for {s} …", flush=True)
-            bt.dump_signals([s], args.days)
-            caches[s] = bt.load_signals(s)
+            print(f"building signal cache for {s} {timeframe} …", flush=True)
+            bt.dump_signals([s], args.days, timeframe=timeframe)
+            caches[s] = bt.load_signals(s, timeframe=timeframe)
 
     # train/validate split by bar index (80/20 days -> first 60% bars / last 40%)
     n = len(next(iter(caches.values()))["df"])
     train_end = int(n * 0.60)
-    print(f"bars: {n} | train [300..{train_end}) | test [{train_end}..{n - 6})", flush=True)
+    warmup = bt.DEFAULT_BARS_HISTORY
+    print(f"bars: {n} | train [{warmup}..{train_end}) | test [{train_end}..{n - 6})"
+          f" | {timeframe}", flush=True)
 
     rows = []
     for wname, weights in WEIGHT_PRESETS.items():
@@ -80,7 +87,7 @@ def main():
             train_trade_count, train_pnl, train_dd, train_pf = 0, 0.0, 0.0, 0.0
             for s in symbols:
                 r = simulate_variant(caches[s], bt.symbol_settings(s), cfg,
-                                     weights, thr, dead, 300, train_end)
+                                     weights, thr, dead, warmup, train_end, s)
                 train_pnl += r["m"]["pnl"]
                 train_dd = max(train_dd, r["m"]["max_drawdown"])
                 train_pf += r["m"]["profit_factor"]
@@ -105,7 +112,8 @@ def main():
         val_pnl, val_dd, val_pf, val_tr = 0.0, 0.0, 0.0, 0
         for s in symbols:
             r = simulate_variant(caches[s], bt.symbol_settings(s), cfg,
-                                 weights, row["thr"], row["dead"], train_end, n - 6)
+                                 weights, row["thr"], row["dead"], train_end,
+                                 n - 6, s)
             val_pnl += r["m"]["pnl"]
             val_dd = max(val_dd, r["m"]["max_drawdown"])
             val_pf += r["m"]["profit_factor"]

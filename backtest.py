@@ -34,13 +34,15 @@ class BTResult:
     equity_curve_R: list
 
 
-def fetch_bars_mt5(cfg: dict, symbol: str, bars: int) -> pd.DataFrame:
+def fetch_bars_mt5(cfg: dict, symbol: str, bars: int,
+                   timeframe: str | None = None) -> pd.DataFrame:
     from core.mt5_client import MT5Client, MT5Error
+    tf = str(timeframe or cfg["trading"]["timeframe"])
     client = MT5Client(cfg["mt5"])
     client.connect()
     try:
         symbol = client.resolve_symbol(symbol)
-        raw = client.copy_bars(symbol, cfg["trading"]["timeframe"], bars)
+        raw = client.copy_bars(symbol, tf, bars)
         df = to_frame(raw)
         df = df.iloc[:-1]          # copy_bars includes the forming bar
         df["atr"] = quant.atr(df, cfg["agents"]["atr_period"])

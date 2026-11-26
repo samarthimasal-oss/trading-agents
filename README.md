@@ -45,6 +45,18 @@ stays PAPER/dry-run by default and is not authorised for live trading.
 Reports: [`docs/reports/`](docs/reports/README.md). Protocol:
 [`docs/PROTOCOL.md`](docs/PROTOCOL.md). See section 7.
 
+**Reliability/performance upgrade (`upgrade/performance-reliability`):**
+advisory-only Gemini when `require_llm_approval=false`, broker-calculated
+sizing from the actual entry/SL with round-down and min-lot rejection,
+deal-confirmed execution and reconciliation, real-data funnel analytics, and a
+causal research replay with gap fills, next-bar spread, commission/slippage,
+no pre-entry stop management and M5/M15 caches. The 2026-11-26 measurement
+found that the old engine booked $23,303 of stops better than the bar open;
+after correcting that and charging labelled costs, all four symbols are
+negative (aggregate -$181,554, PF 0.72), so nothing is promoted. Full numbers
+and caveats:
+[`docs/reports/upgrade-performance-reliability.md`](docs/reports/upgrade-performance-reliability.md).
+
 ```
                        +-----------------------+
   MT5 market data ---> |  Quant agents         |  trend / momentum / reversion
@@ -288,6 +300,46 @@ Configuration lives in `strategies`: `enabled`, `min_confidence`,
 per-engine `engines.<name>` blocks, and a `replay` block. The engines are not
 yet wired into the live executor; `signal_mode=engines` is a later phase.
 
+### Research replay of the live quant stack (`research/backtest.py`)
+
+The five quant agents + Kronos path that the runner actually trades is measured
+by `research/backtest.py`. Its execution model is causal and conservative:
+
+```text
+decision on bar i -> fill at bar i+1 open
+long buys the ask; short exits at the ask
+gap through SL/TP -> fill at the gap open (sl_gap / tp_gap)
+one bar touches SL and TP -> SL first
+commission per round turn + adverse slippage on every fill
+spread = max(recorded bar spread, configured floor)
+cooldown = ceil(live seconds / bar seconds), never shorter than live
+```
+
+The optional `backtest` config block documents the cost assumptions:
+
+| Key | Meaning |
+|---|---|
+| `commission_per_lot_round_turn` | round-turn commission per lot |
+| `slippage_points` | adverse points charged on each fill |
+| `spread_points` / `spread_points_by_symbol` | minimum spread when the feed records zero |
+| `start_equity`, `bars_history` | replay account and warmup |
+
+M15 keeps the legacy cache names `state/bt_{symbol}.csv` /
+`bt_sig_{symbol}.pkl`; other timeframes use `_{TF}`. M5 and M15 are configured
+independently:
+
+```powershell
+python -m research.backtest --symbols XAUUSD --timeframe M5 --days 60 --dump-signals
+python -m research.backtest --symbols XAUUSD --timeframe M5 --days 60 --offline `
+  --spread-points 20 --commission 7 --slippage-points 2
+python -m research.tune --timeframe M15
+```
+
+`research/measure_upgrade.py` replays the same cached votes through the engine
+at a chosen baseline commit and the current engine, and reports the fill-model
+bias. The 2026-11-26 run is in
+[`docs/reports/upgrade-performance-reliability.md`](docs/reports/upgrade-performance-reliability.md).
+
 ## 7. Native MQL5 EA (PAPER by default)
 
 `mql5/` contains the Expert Advisor and its modules:
@@ -372,6 +424,8 @@ execution. Full reports, caveats and the sizing bug found during the pass are in
 python main.py backtest --csv demo_1min.csv --bars 500   # legacy quant replay
 python main.py strategies --csv demo_1min.csv           # five-engine research report
 python main.py walkforward --bars 12000                # folds + holdout + Monte Carlo
+python -m research.backtest --offline --timeframe M15  # causal quant/Kronos replay
+python -m research.measure_upgrade --baseline-ref a88a920  # before/after report
 python main.py run --dry-run               # full live pipeline, NO real orders
 python -m pytest -q                        # regression suite
 ```
@@ -396,10 +450,12 @@ python main.py run                         # live, MT5 terminal must be connecte
 python main.py status                      # account, positions, journal
 ```
 
-Research tooling lives in `research/`: `backtest.py` (full replay engine),
-`tune.py` (weight grid search), `horizon_edges.py` (per-agent horizon sweeps).
-The top-level `backtest.py` remains the CLI facade. `demo_1min.csv` is a
-synthetic fixture for determinism tests, **not** a performance claim.
+Research tooling lives in `research/`: `backtest.py` (full replay engine with
+per-timeframe caches), `tune.py` (weight grid search), `horizon_edges.py`
+(per-agent horizon sweeps), and `measure_upgrade.py` (baseline/current
+fill-model comparison). The top-level `backtest.py` remains the CLI facade.
+`demo_1min.csv` is a synthetic fixture for determinism tests, **not** a
+performance claim.
 
 ## 9. What it does on your account (per poll cycle)
 

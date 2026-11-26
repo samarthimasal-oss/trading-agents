@@ -155,6 +155,19 @@
       "max_open_positions": 1
     }
   },
+  "backtest": {
+    "start_equity": 100000.0,
+    "bars_history": 300,
+    "commission_per_lot_round_turn": 7.0,
+    "slippage_points": 2.0,
+    "spread_points": 8.0,
+    "spread_points_by_symbol": {
+      "XAUUSD": 20.0,
+      "EURUSD": 8.0,
+      "GBPUSD": 10.0,
+      "USDJPY": 8.0
+    }
+  },
   "ea": {
     "enabled": false,
     "host": "127.0.0.1",

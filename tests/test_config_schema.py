@@ -115,3 +115,23 @@ def test_llm_timeout_seconds_is_validated():
     with pytest.raises(ConfigError) as exc:
         validate_config(cfg)
     assert "timeout_seconds" in str(exc.value)
+
+
+def test_backtest_cost_section_is_validated():
+    cfg = validate_config(copy.deepcopy(_example()))
+    assert cfg["backtest"]["commission_per_lot_round_turn"] == 7.0
+    assert cfg["backtest"]["spread_points_by_symbol"]["XAUUSD"] == 20.0
+
+    bad = copy.deepcopy(_example())
+    bad["backtest"]["spread_points_by_symbol"] = {"XAUUSD": "wide"}
+    with pytest.raises(ConfigError) as exc:
+        validate_config(bad)
+    assert "spread_points_by_symbol" in str(exc.value)
+
+
+def test_backtest_history_must_be_long_enough():
+    cfg = copy.deepcopy(_example())
+    cfg["backtest"]["bars_history"] = 50
+    with pytest.raises(ConfigError) as exc:
+        validate_config(cfg)
+    assert "bars_history" in str(exc.value)

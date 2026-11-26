@@ -283,6 +283,34 @@ def validate_config(cfg: dict) -> dict:
                     _integer(errors, replay, "strategies.replay",
                              "max_open_positions", lo=1, hi=100, required=False)
 
+    backtest = cfg.get("backtest")
+    if backtest is not None:
+        if not isinstance(backtest, dict):
+            errors.append("backtest: must be an object")
+        else:
+            _number(errors, backtest, "backtest", "start_equity", lo=1,
+                    hi=1_000_000_000, required=False)
+            _integer(errors, backtest, "backtest", "bars_history", lo=100,
+                     hi=100000, required=False)
+            for key in ("commission_per_lot_round_turn", "slippage_points",
+                        "spread_points"):
+                _number(errors, backtest, "backtest", key, lo=0,
+                        hi=1_000_000, required=False)
+            floors = backtest.get("spread_points_by_symbol")
+            if floors is not None:
+                if not isinstance(floors, dict):
+                    errors.append("backtest.spread_points_by_symbol: must be an object")
+                else:
+                    for sym, floor in floors.items():
+                        if not isinstance(sym, str) or not sym.strip():
+                            errors.append(
+                                "backtest.spread_points_by_symbol: keys must be symbol names")
+                            continue
+                        if not _num(floor) or float(floor) < 0 or float(floor) > 1_000_000:
+                            errors.append(
+                                f"backtest.spread_points_by_symbol.{sym}: "
+                                "must be a number between 0 and 1000000")
+
     logging_cfg = _section(cfg, "logging", errors)
     _string(errors, logging_cfg, "logging", "db_file")
     _string(errors, logging_cfg, "logging", "log_file")

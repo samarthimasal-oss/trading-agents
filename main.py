@@ -161,14 +161,15 @@ def cmd_run(cfg: dict, dry_run: bool) -> int:
 
 def cmd_backtest(cfg: dict, args) -> int:
     import backtest as bt
+    timeframe = str(args.timeframe or cfg["trading"]["timeframe"])
     if args.csv:
         df = bt.load_csv(args.csv)
         data_note = f"csv={args.csv} ({len(df)} bars)"
     else:
         df = bt.fetch_bars_mt5(cfg, args.symbol or cfg["trading"]["symbol"],
-                               int(args.bars))
+                               int(args.bars), timeframe=timeframe)
         data_note = (f"MT5 {args.symbol or cfg['trading']['symbol']} "
-                     f"{cfg['trading']['timeframe']} ({len(df)} bars)")
+                     f"{timeframe} ({len(df)} bars)")
     res = bt.run(df, cfg)
     bt.print_result(res, data_note)
     return 0
@@ -198,16 +199,17 @@ def _read_strategy_frame(cfg: dict, args):
     from core.mt5_client import MT5Client
 
     symbol = args.symbol or cfg["trading"]["symbol"]
+    timeframe = str(args.timeframe or cfg["trading"]["timeframe"])
     client = MT5Client(cfg["mt5"])
     client.connect()
     try:
         resolved = client.resolve_symbol(symbol)
-        raw = client.copy_bars(resolved, cfg["trading"]["timeframe"], int(args.bars))
+        raw = client.copy_bars(resolved, timeframe, int(args.bars))
         df = to_frame(raw).reset_index()
         df["time"] = epoch_seconds(df["time"])
     finally:
         client.shutdown()
-    return df, f"MT5 {resolved} {cfg['trading']['timeframe']} ({len(df)} bars)"
+    return df, f"MT5 {resolved} {timeframe} ({len(df)} bars)"
 
 
 def _strategy_overrides(args, df) -> tuple[dict, str]:
@@ -598,6 +600,9 @@ def main() -> int:
     parser.add_argument("--config", default=os.path.join(ROOT, "config.json"))
     parser.add_argument("--symbol", default=None)
     parser.add_argument("--bars", default=5000, type=int)
+    parser.add_argument("--timeframe", default=None,
+                        help="bar timeframe for research/backtest commands "
+                             "(default: trading.timeframe)")
     parser.add_argument("--csv", default=None)
     parser.add_argument("--volume", default=None, type=float)
     parser.add_argument("--dry-run", action="store_true")
