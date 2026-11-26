@@ -50,11 +50,11 @@ advisory-only Gemini when `require_llm_approval=false`, broker-calculated
 sizing from the actual entry/SL with round-down and min-lot rejection,
 deal-confirmed execution and reconciliation, real-data funnel analytics, and a
 causal research replay with gap fills, next-bar spread, commission/slippage,
-no pre-entry stop management and M5/M15 caches. The 2026-11-26 measurement
-found that the old engine booked $23,303 of stops better than the bar open;
-after correcting that and charging labelled costs, all four symbols are
-negative (aggregate -$181,554, PF 0.72), so nothing is promoted. Full numbers
-and caveats:
+live partial/breakeven/trailing/time-stop parity, no pre-entry stop management
+and M5/M15 caches. The 2026-11-26 measurement found that the old engine booked
+$23,303 of stops better than the bar open; after correcting that and charging
+labelled costs, all four symbols are negative (aggregate -$169,409, PF 0.75),
+so nothing is promoted. Full numbers and caveats:
 [`docs/reports/upgrade-performance-reliability.md`](docs/reports/upgrade-performance-reliability.md).
 
 ```
@@ -312,6 +312,9 @@ gap through SL/TP -> fill at the gap open (sl_gap / tp_gap)
 one bar touches SL and TP -> SL first
 commission per round turn + adverse slippage on every fill
 spread = max(recorded bar spread, configured floor)
+1R partial close (50%) + forced breakeven, commission on both legs
+trailing stop only moves by trailing_step_atr * ATR
+optional time stop from risk.time_stop_minutes
 cooldown = ceil(live seconds / bar seconds), never shorter than live
 ```
 

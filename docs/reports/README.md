@@ -27,17 +27,18 @@ Report, dataset, JSON and transcript:
 [`upgrade-performance-reliability.md`](upgrade-performance-reliability.md)
 measures the signal/risk/execution/funnel upgrade on the cached M15 data
 (7,980 bars per symbol). The baseline is the engine at `a88a920`; the new
-engine fills on the next bar, pays the ask, fills gaps at the gap open, and
-charges spread/commission/slippage.
+engine fills on the next bar, pays the ask, fills gaps at the gap open,
+charges spread/commission/slippage, and mirrors the live 1R partial close,
+breakeven, stepped trailing and optional time stop.
 
 **Key result: the baseline's +$14,116.92 XAUUSD profit was inflated by an
 execution artifact.** 24 stop exits were booked better than the bar open,
 worth +$19,552.20. With the same cooldown the corrected engine returns
-+$4,990.26 before costs (it also stops managing next-bar fills with the
-pre-entry close), and -$23,769.14 after labelled costs (PF 0.93). The
-four-symbol aggregate is -$181,553.64 (PF 0.72). The corrected cooldown raises
-trade count by 22.0% (4,339 → 5,293) but does not create an edge. No engine is
-promoted; the system stays PAPER/dry-run.
++$5,119.46 before costs (it also stops managing next-bar fills with the
+pre-entry close and models the live partial), and -$15,631.33 after labelled
+costs (PF 0.96). The four-symbol aggregate is -$169,408.83 (PF 0.75). The
+corrected cooldown raises trade count by 18.5% (4,339 → 5,143) but does not
+create an edge. No engine is promoted; the system stays PAPER/dry-run.
 
 ## Phase 3 EA Strategy Tester runs
 

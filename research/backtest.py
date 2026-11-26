@@ -3,7 +3,8 @@
 Replays the live pipeline over MT5 M15 history:
   * same agent code path (quant.AGENTS), same consensus math
   * same risk sizing (1% risk, leverage cap), same SL/TP mults
-  * breakeven + ATR trailing, opposite-consensus close, dead-market gate
+  * live management: 1R partial close, forced breakeven, stepped ATR trailing,
+    optional time stop, opposite-consensus close, dead-market gate
   * next-bar fills; bars are BID quotes (buys pay spread, sells exit at ask)
   * SL checked before TP inside a bar (conservative ambiguity rule)
 
@@ -202,6 +203,24 @@ def size_volume(symbol: str, info: dict, equity: float, atr_val: float,
     return round(volume, 8)
 
 
+def partial_volume(volume: float, info: dict, pct: float) -> float:
+    """Volume for a partial close, floored to the broker step.
+
+    Mirrors ``Executor._partial_volume``: never closes below the minimum lot
+    and never closes the whole position, so the trade can keep running.
+    """
+    step = float(info["volume_step"] or 0.01)
+    vmin = float(info["volume_min"] or step)
+    raw = float(volume) * float(pct) / 100.0
+    vol = math.floor(raw / step + 1e-9) * step
+    vol = round(vol, 8)
+    if vol < vmin - 1e-9:
+        return 0.0
+    if float(volume) - vol < vmin - 1e-9:
+        return 0.0
+    return vol
+
+
 def _settle(symbol: str, entry: float, exitp: float, side: int, vol: float, info: dict) -> float:
     """P/L in USD for each quote convention."""
     sym = symbol.upper()
@@ -257,30 +276,49 @@ def load_signals(symbol: str, timeframe: str = "M15") -> dict:
 # ================================================================== replay core
 ### shared per-position maintenance used by both simulators
 def _apply_manage(pos: dict, cur: float, atr_val: float, spread_px: float,
-                  min_dist: float, risk_cfg: dict) -> None:
-    """Breakeven lock + ATR trailing (exact live Executor rules)."""
+                  min_dist: float, risk_cfg: dict,
+                  forced_be: bool = False) -> None:
+    """Breakeven lock + ATR trailing with the live step threshold.
+
+    Mirrors ``Executor.manage``: the stop only moves when the improvement
+    clears ``trailing_step_atr * ATR`` (floored at the broker minimum
+    distance), and a partial close forces the breakeven lock even when the
+    normal breakeven trigger has not been reached.
+    """
     trail = float(risk_cfg.get("trailing_atr", 1.0)) * atr_val
     be = float(risk_cfg.get("breakeven_atr", 1.0)) * atr_val
-    sl = pos["sl"]
-    cands = []
+    step = max(float(risk_cfg.get("trailing_step_atr", 0.0) or 0.0) * atr_val,
+               min_dist)
+    sl = float(pos.get("sl") or 0.0)
+    candidates: list[float] = []
     if pos["side"] == 1:
-        if cur - pos["entry"] >= be:
-            cands.append(pos["entry"] + min_dist + spread_px)
-        if cur - trail > (sl or 0):
-            cands.append(cur - trail)
-        if cands:
-            new_sl = max(cands)
-            if new_sl < cur - min_dist and new_sl > (sl or 0) + 1e-12:
-                pos["sl"] = round(new_sl, 8)
+        if cur - pos["entry"] >= be or forced_be:
+            candidates.append(pos["entry"] + min_dist + spread_px)
+        trailing = cur - trail
+        if sl == 0 or trailing > sl:
+            candidates.append(trailing)
+        if not candidates:
+            return
+        levels = ([sl] if sl > 0 else []) + candidates
+        new_sl = max(levels)
+        if sl > 0 and new_sl - sl < step - 1e-9:
+            return
+        if new_sl > 0 and new_sl < cur - min_dist:
+            pos["sl"] = round(new_sl, 8)
     else:
-        if pos["entry"] - cur >= be:
-            cands.append(pos["entry"] - min_dist - spread_px)
-        if (sl or 0) == 0 or cur + trail < sl:
-            cands.append(cur + trail)
-        if cands:
-            new_sl = min(cands)
-            if new_sl > cur + min_dist and new_sl < (sl or 0) - 1e-12:
-                pos["sl"] = round(new_sl, 8)
+        if pos["entry"] - cur >= be or forced_be:
+            candidates.append(pos["entry"] - min_dist - spread_px)
+        trailing = cur + trail
+        if sl == 0 or trailing < sl:
+            candidates.append(trailing)
+        if not candidates:
+            return
+        levels = ([sl] if sl > 0 else []) + candidates
+        new_sl = min(levels)
+        if sl > 0 and sl - new_sl < step - 1e-9:
+            return
+        if new_sl > 0 and new_sl > cur + min_dist:
+            pos["sl"] = round(new_sl, 8)
 
 
 def _check_exits(pos: dict, open_: float, hi: float, lo: float,
@@ -344,6 +382,8 @@ def replay(full: pd.DataFrame, info: dict, cfg: dict, votes: np.ndarray,
       * a gap through the stop fills at the gap open, not the stop level;
       * SL is assumed before TP when both are touched in one bar;
       * commission is charged per round turn and slippage against the trade;
+      * the live 1R partial close, forced breakeven, stepped trailing and
+        optional time stop are evaluated at the bar close;
       * ``spread_floor_points`` is applied when the CSV's spread is zero.
 
     ``kronos_signal``: optional callable(df_slice, atr) -> Signal, refreshed
@@ -375,6 +415,11 @@ def replay(full: pd.DataFrame, info: dict, cfg: dict, votes: np.ndarray,
     slip_px = max(0.0, float(slippage_points or 0.0)) * point
     cooldown = cooldown_bars(
         r.get("min_gap_seconds_between_same_symbol_trades", 0), timeframe)
+    partial_on = bool(r.get("partial_close_enabled", True))
+    partial_r = float(r.get("partial_close_at_r", 1.0) or 1.0)
+    partial_pct = float(r.get("partial_close_pct", 50.0) or 50.0)
+    time_stop_min = float(r.get("time_stop_minutes", 0.0) or 0.0)
+    tf_seconds = timeframe_seconds(timeframe)
 
     opens = full["open"].to_numpy(dtype=float)
     highs = full["high"].to_numpy(dtype=float)
@@ -399,20 +444,30 @@ def replay(full: pd.DataFrame, info: dict, cfg: dict, votes: np.ndarray,
     kg = None                       # cached Kronos (dir, conf)
     kr_bar = -10**9
 
-    def finalize(pos: dict, px: float, bar: int, why: str) -> None:
-        """Settle a closed trade: gross P/L, round-turn cost, net and R."""
+    def finalize(pos: dict, px: float, bar: int, why: str) -> float:
+        """Settle the remaining volume; return the net added to equity.
+
+        A partial close is realised earlier, so the trade's reported P/L is
+        the sum of the banked partial and the remaining leg, while equity is
+        credited leg by leg.
+        """
         pos.update(exit_bar=int(bar), exit_price=float(px), exit_why=why,
                    exit_time=str(times[bar]))
-        gross = _settle(symbol, pos["entry"], px, pos["side"],
-                        pos["volume"], info)
-        cost = float(pos["volume"]) * commission
+        open_volume = float(pos.get("open_volume", pos["volume"]))
+        remaining_gross = _settle(symbol, pos["entry"], px, pos["side"],
+                                  open_volume, info)
+        remaining_net = remaining_gross - open_volume * commission
+        total_gross = float(pos.get("realized_gross") or 0.0) + remaining_gross
+        total_cost = float(pos["volume"]) * commission
+        total_net = float(pos.get("realized_pnl") or 0.0) + remaining_net
         risk_usd = float(pos.get("risk_usd") or 0.0)
-        net = gross - cost
-        pos.update(pnl_gross=round(gross, 2), commission=round(cost, 2),
-                   pnl=round(net, 2), settled=True,
+        pos.update(pnl_gross=round(total_gross, 2), commission=round(total_cost, 2),
+                   pnl=round(total_net, 2), open_volume=round(open_volume, 8),
+                   settled=True,
                    bars_held=max(0, int(bar) - int(pos.get("entry_bar", bar))),
-                   r_multiple=(round(net / risk_usd, 3)
+                   r_multiple=(round(total_net / risk_usd, 3)
                                if risk_usd > 0 else None))
+        return remaining_net
 
     for i in range(start, end):
         atr_val = float(atrs[i]) if np.isfinite(atrs[i]) else 0.0
@@ -424,8 +479,7 @@ def replay(full: pd.DataFrame, info: dict, cfg: dict, votes: np.ndarray,
         # 1) exits at bar i (SL/TP as of end of bar i-1); gaps fill at open
         for pos in opened:
             if _check_exits(pos, opens[i], highs[i], lows[i], sp, slip_px):
-                finalize(pos, pos["exit_price"], i, pos["exit_why"])
-                equity += pos["pnl"]
+                equity += finalize(pos, pos["exit_price"], i, pos["exit_why"])
                 trades.append(pos)
         opened = [p for p in opened if p["exit_bar"] is None]
 
@@ -471,8 +525,7 @@ def replay(full: pd.DataFrame, info: dict, cfg: dict, votes: np.ndarray,
                     continue
                 px = (opens[nxt] - slip_px if side == 1
                       else opens[nxt] + float(spreads[nxt]) + slip_px)
-                finalize(pos, px, nxt, "opposite")
-                equity += pos["pnl"]
+                equity += finalize(pos, px, nxt, "opposite")
                 trades.append(pos)
             opened = [p for p in opened if p["exit_bar"] is None]
 
@@ -500,6 +553,12 @@ def replay(full: pd.DataFrame, info: dict, cfg: dict, votes: np.ndarray,
                                    "sl": sl, "tp": tp,
                                    "atr": round(atr_val, 8),
                                    "risk_usd": round(risk_usd, 2),
+                                   "open_volume": vol,
+                                   "risk_dist": abs(fill - sl),
+                                   "partial_done": False,
+                                   "partials": [],
+                                   "realized_pnl": 0.0,
+                                   "realized_gross": 0.0,
                                    "strength": round(strength, 3),
                                    "conf": round(confidence, 3),
                                    "votes": {n: int(d) for n, d in zip(names, dirs_i)},
@@ -511,14 +570,53 @@ def replay(full: pd.DataFrame, info: dict, cfg: dict, votes: np.ndarray,
                     samples.append((symbol, str(times[i]), "consensus", direction,
                                     round(confidence, 3), 0.0, 0))
 
-        # 6) BE/trailing at bar i close (effective from bar i+1)
+        # 6) partial profit, time stop, BE/trailing at bar i close
         for pos in opened:
             if int(pos["entry_bar"]) > i:
                 continue        # filled at i+1's open; bar i's close predates it
             bid_i = closes[i]
             ask_i = closes[i] + sp
             cur = bid_i if pos["side"] == 1 else ask_i
-            _apply_manage(pos, cur, atr_val, sp, min_dist, r)
+            if (time_stop_min > 0
+                    and (i - int(pos["entry_bar"]) + 1) * tf_seconds
+                    >= time_stop_min * 60):
+                px = (bid_i - slip_px if pos["side"] == 1
+                      else ask_i + slip_px)
+                equity += finalize(pos, px, i, "time_stop")
+                trades.append(pos)
+                continue
+            forced_be = False
+            if (partial_on and not pos.get("partial_done")
+                    and float(pos.get("risk_dist") or 0.0) > 0):
+                profit_dist = (cur - pos["entry"] if pos["side"] == 1
+                               else pos["entry"] - cur)
+                if profit_dist >= partial_r * float(pos["risk_dist"]):
+                    vol = partial_volume(pos["open_volume"], info, partial_pct)
+                    if vol > 0:
+                        px = (bid_i - slip_px if pos["side"] == 1
+                              else ask_i + slip_px)
+                        gross = _settle(symbol, pos["entry"], px, pos["side"],
+                                        vol, info)
+                        cost = vol * commission
+                        net = gross - cost
+                        pos["partials"].append({
+                            "bar": int(i), "time": str(times[i]),
+                            "volume": round(vol, 8), "price": round(px, 8),
+                            "pnl_gross": round(gross, 2),
+                            "commission": round(cost, 2),
+                            "pnl": round(net, 2)})
+                        pos["open_volume"] = round(
+                            float(pos["open_volume"]) - vol, 8)
+                        pos["partial_done"] = True
+                        pos["realized_pnl"] = (
+                            float(pos.get("realized_pnl") or 0.0) + net)
+                        pos["realized_gross"] = (
+                            float(pos.get("realized_gross") or 0.0) + gross)
+                        equity += net
+                        forced_be = True
+            _apply_manage(pos, cur, atr_val, sp, min_dist, r,
+                          forced_be=forced_be)
+        opened = [p for p in opened if p["exit_bar"] is None]
 
         # 7) tuning sample (agent votes vs forward move, 4 bars in ATR)
         if i + 5 < len(closes):
@@ -537,8 +635,7 @@ def replay(full: pd.DataFrame, info: dict, cfg: dict, votes: np.ndarray,
         for pos in opened:
             px = (closes[last] - slip_px if pos["side"] == 1
                   else closes[last] + float(spreads[last]) + slip_px)
-            finalize(pos, px, last, "eod")
-            equity += pos["pnl"]
+            equity += finalize(pos, px, last, "eod")
             trades.append(pos)
         opened = []
         curve[-1] = equity
@@ -719,7 +816,10 @@ def run_symbol_full(symbol: str, df: pd.DataFrame, info: dict, cfg: dict,
             votes[i, k], confs[i, k] = s.direction, s.confidence
 
     return replay(df, info, cfg, votes, confs, names, weights,
-                  float(a["consensus_threshold"]), kronos_signal=kronos_signal,
+                  float(a["consensus_threshold"]),
+                  dead_market_ratio=float(
+                      cfg["risk"].get("dead_market_atr_ratio", 0.62)),
+                  kronos_signal=kronos_signal,
                   kronos_stride=kronos_stride, kcfg=kcfg,
                   start=bars_history, symbol=symbol, timeframe=timeframe,
                   commission_per_lot=commission_per_lot,

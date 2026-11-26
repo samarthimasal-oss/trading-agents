@@ -52,6 +52,10 @@ def make_cfg(**risk_overrides) -> dict:
         "breakeven_atr": 1000.0,     # keep the stop where the test put it
         "trailing_atr": 1000.0,
         "trailing_step_atr": 0.0,
+        "partial_close_enabled": False,
+        "partial_close_at_r": 1.0,
+        "partial_close_pct": 50.0,
+        "time_stop_minutes": 0.0,
         "min_gap_seconds_between_same_symbol_trades": 0,
     }
     risk.update(risk_overrides)
@@ -232,6 +236,77 @@ def test_next_bar_fill_is_not_managed_with_the_pre_entry_close():
     assert trade["exit_why"] == "eod"
     assert trade["exit_bar"] == 4
     assert trade["exit_price"] == pytest.approx(2000.0)
+
+
+# ------------------------------------------------------------------ management
+def partial_frame() -> pd.DataFrame:
+    return frame(
+        opens=[2000, 2000, 2000, 2010, 2011],
+        highs=[2000.1, 2000.1, 2000.1, 2015, 2012],
+        lows=[1999.9, 1999.9, 1999.9, 2013, 2010],
+        closes=[2000, 2000, 2000, 2014, 2011],
+    )
+
+
+def test_partial_close_books_half_at_one_r_and_forces_breakeven():
+    res = run(partial_frame(), start=2, end=5,
+              cfg=make_cfg(fixed_lot=1.0, partial_close_enabled=True))
+    trade = res["trades"][0]
+    assert trade["volume"] == pytest.approx(1.0)
+    assert trade["open_volume"] == pytest.approx(0.5)
+    assert len(trade["partials"]) == 1
+    partial = trade["partials"][0]
+    assert partial["volume"] == pytest.approx(0.5)
+    assert partial["price"] == pytest.approx(2014.0)
+    assert partial["pnl"] == pytest.approx(190.0)
+    # the forced breakeven stop (entry + min_dist + spread) is hit on bar 4
+    assert trade["exit_why"] == "sl"
+    assert trade["exit_price"] == pytest.approx(2010.42)
+    assert trade["pnl"] == pytest.approx(201.0)
+    assert trade["commission"] == pytest.approx(0.0)
+
+
+def test_partial_close_charges_commission_on_both_legs():
+    res = run(partial_frame(), start=2, end=5, commission=7.0,
+              cfg=make_cfg(fixed_lot=1.0, partial_close_enabled=True))
+    trade = res["trades"][0]
+    assert trade["partials"][0]["commission"] == pytest.approx(3.5)
+    assert trade["commission"] == pytest.approx(7.0)
+    assert trade["pnl"] == pytest.approx(194.0)
+
+
+def test_trailing_step_blocks_small_improvements():
+    pos = {"side": 1, "entry": 2000.0, "sl": 1997.0}
+    cfg = {"trailing_atr": 1.0, "breakeven_atr": 1000.0,
+           "trailing_step_atr": 1.0}
+    bt._apply_manage(pos, 2000.5, 2.0, 0.20, 0.02, cfg)
+    assert pos["sl"] == pytest.approx(1997.0)   # 1.5 < step 2.0
+    bt._apply_manage(pos, 2001.0, 2.0, 0.20, 0.02, cfg)
+    assert pos["sl"] == pytest.approx(1999.0)   # exactly one step
+
+
+def test_time_stop_closes_after_the_configured_minutes():
+    data = frame(
+        opens=[2000, 2000, 2000, 2010, 2011],
+        highs=[2000.1, 2000.1, 2000.1, 2011.5, 2011.5],
+        lows=[1999.9, 1999.9, 1999.9, 2010.5, 2010.5],
+        closes=[2000, 2000, 2000, 2011, 2011],
+    )
+    res = run(data, start=2, end=5,
+              cfg=make_cfg(fixed_lot=1.0, time_stop_minutes=30))
+    trade = res["trades"][0]
+    assert trade["entry_bar"] == 3
+    assert trade["exit_bar"] == 4
+    assert trade["exit_why"] == "time_stop"
+    assert trade["exit_price"] == pytest.approx(2011.0)
+    assert trade["pnl"] == pytest.approx(80.0)
+
+
+def test_partial_volume_floors_to_step_and_keeps_the_position_open():
+    assert bt.partial_volume(1.0, XAU_INFO, 50.0) == pytest.approx(0.5)
+    assert bt.partial_volume(0.03, XAU_INFO, 50.0) == pytest.approx(0.01)
+    assert bt.partial_volume(0.01, XAU_INFO, 50.0) == 0.0
+    assert bt.partial_volume(0.02, XAU_INFO, 100.0) == 0.0
 
 
 # ---------------------------------------------------------------------- sizing
