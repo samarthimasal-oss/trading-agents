@@ -54,7 +54,9 @@ live partial/breakeven/trailing/time-stop parity, no pre-entry stop management
 and M5/M15 caches. The 2026-11-26 measurement found that the old engine booked
 $23,303 of stops better than the bar open; after correcting that and charging
 labelled costs, all four symbols are negative (aggregate -$169,409, PF 0.75),
-so nothing is promoted. Full numbers and caveats:
+so nothing is promoted. A follow-up cost-aware train/validation/holdout study
+of 119 challengers also failed every profit gate on the untouched holdout;
+`config.json` was not changed. Full numbers and caveats:
 [`docs/reports/upgrade-performance-reliability.md`](docs/reports/upgrade-performance-reliability.md).
 
 ```
@@ -335,8 +337,19 @@ independently:
 python -m research.backtest --symbols XAUUSD --timeframe M5 --days 60 --dump-signals
 python -m research.backtest --symbols XAUUSD --timeframe M5 --days 60 --offline `
   --spread-points 20 --commission 7 --slippage-points 2
-python -m research.tune --timeframe M15
+python -m research.tune --timeframe M15 --offline
 ```
+
+`research/tune.py` is a cost-aware study, not a blind optimiser. It splits the
+bars chronologically into train/validation/holdout, charges the same
+commission/slippage/spread floors as the replay, enforces a frequency floor
+(120 trades per 1,000 symbol-bars by default), selects the winner on validation
+only, and evaluates the untouched holdout once for the winner and the live
+baseline. `--apply` writes `config.json` (with a `.bak_pre_tune` backup) only
+if the holdout has positive expectancy, PF >= 1.05, enough frequency and
+better PnL, expectancy and PF than the baseline. The 2026-11-26 study failed
+those gates, so the live config was not changed; results are in
+`state/tuning_result.json` and section 10 of the performance report.
 
 `research/measure_upgrade.py` replays the same cached votes through the engine
 at a chosen baseline commit and the current engine, and reports the fill-model
@@ -454,11 +467,11 @@ python main.py status                      # account, positions, journal
 ```
 
 Research tooling lives in `research/`: `backtest.py` (full replay engine with
-per-timeframe caches), `tune.py` (weight grid search), `horizon_edges.py`
-(per-agent horizon sweeps), and `measure_upgrade.py` (baseline/current
-fill-model comparison). The top-level `backtest.py` remains the CLI facade.
-`demo_1min.csv` is a synthetic fixture for determinism tests, **not** a
-performance claim.
+per-timeframe caches), `tune.py` (cost-aware train/validation/holdout study),
+`horizon_edges.py` (per-agent horizon sweeps), and `measure_upgrade.py`
+(baseline/current fill-model comparison). The top-level `backtest.py` remains
+the CLI facade. `demo_1min.csv` is a synthetic fixture for determinism tests,
+**not** a performance claim.
 
 ## 9. What it does on your account (per poll cycle)
 

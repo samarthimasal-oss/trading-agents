@@ -40,6 +40,14 @@ costs (PF 0.96). The four-symbol aggregate is -$169,408.83 (PF 0.75). The
 corrected cooldown raises trade count by 18.5% (4,339 → 5,143) but does not
 create an edge. No engine is promoted; the system stays PAPER/dry-run.
 
+The report's follow-up **cost-aware study** uses a chronological
+train/validation/holdout split and 119 challengers plus the live baseline.
+The validation winner (momentum-heavy, threshold 0.40, dead-market 0.75) lost
+-$58,527.61 with PF 0.63 on the untouched holdout, versus the baseline's
+-$63,907.59 and PF 0.64. It lost less in total only by trading less; per-trade
+expectancy and PF were worse. Every profit gate failed, so `config.json` was
+not changed. Details and the full gate table are in section 10 of the report.
+
 ## Phase 3 EA Strategy Tester runs
 
 | Folder | Period | Tester model | Trades | Win rate | Net R | Profit factor | Max DD |

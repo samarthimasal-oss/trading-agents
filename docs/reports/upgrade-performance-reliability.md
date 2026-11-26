@@ -13,7 +13,8 @@ real-data funnel analytics, and a causal research backtest. No live promotion.
 | 2 | `007d947` | Risk/execution: broker-calculated sizing from the actual entry/SL, round **down** to the broker step, reject a minimum lot that would exceed the risk budget, margin/leverage cap, deal-confirmed fills, duplicate/margin/symbol/SL-TP guards, send-error reconciliation, reliable SL modification, fail-closed guardian |
 | 3 | `a88a920` | Real-data funnel: `evaluations` journal (one row per stage per symbol per closed bar), `GET /funnel`, Signal Funnel dashboard with rejection reasons and bot-only closed trades |
 | 4 | `578f636` | Research backtest realism: next-bar fills, bid/ask spread, gap-through fills, SL-before-TP, round-turn commission, exit slippage, spread floor, no pre-entry stop management, M5/M15 caches and cooldown scaling, extended metrics, before/after measurement |
-| 5 | this branch tip | Live-management parity: 1R partial close with broker-step volume, commission on both legs, forced breakeven, trailing step, optional time stop; measurement rerun |
+| 5 | `a71bb1d` | Live-management parity: 1R partial close with broker-step volume, commission on both legs, forced breakeven, trailing step, optional time stop; measurement rerun |
+| 6 | this branch tip | Cost-aware tuning: chronological train/validation/holdout split, labelled costs, frequency floor, validation-only selection, one-shot holdout gates. The study found no promotable change |
 
 The live runner still uses the five quant agents + Kronos + Gemini advisory
 review + risk guardian. No mandatory filter was added, so the signal path is
@@ -234,8 +235,9 @@ must not be inferred from the M15 table.
 * The same-cooldown comparison mixes the fill correction, the pre-entry
   management correction, and partial-close parity. It is a before/after
   upgrade comparison, not an isolated attribution of any one bug.
-* The sample is in-sample for the fixed config. No parameter search was run on
-  it in this phase; `research/tune.py` keeps its train/test split.
+* The full-sample measurement is in-sample for the fixed config. The separate
+  cost-aware study in section 10 uses a chronological holdout; its validation
+  improvement did not survive the holdout.
 * A negative result is still a result: the upgrade's job was to make the
   measurement honest, not to guarantee a profitable strategy.
 
@@ -253,8 +255,11 @@ python -m research.backtest --symbols XAUUSD --days 120 --offline --out state/bt
 python -m research.backtest --symbols XAUUSD --days 120 --offline `
   --spread-points 20 --commission 7 --slippage-points 2 --out state/bt_xau_costs.json
 
-# 4) research-backtest tests
-python -m pytest tests/test_research_backtest.py -q
+# 4) cost-aware train/validation/holdout study
+python -m research.tune --timeframe M15 --offline
+
+# 5) research and tuner tests
+python -m pytest tests/test_research_backtest.py tests/test_tuning.py -q
 ```
 
 The 24 research-backtest tests cover next-bar fills, ask/bid entry and exit,
@@ -262,9 +267,92 @@ gap-through stops, SL-before-TP, spread floor, commission drag, round-down
 sizing, minimum-lot rejection, fixed-lot risk cap, no management before the
 entry bar closes, partial close at 1R, forced breakeven, commission on both
 legs, trailing step, time stop, M5/M15 cooldown and cache paths, extended
-metrics, and a no-lookahead equivalence check.
+metrics, and a no-lookahead equivalence check. The 20 tuner tests cover split
+boundaries/non-overlap, exit variants, cost overrides, frequency floors,
+validation-only selection, holdout-once evaluation, the profit gates and the
+gated config write. The full Python suite is **257 tests**.
 
-## 10. Verdict
+## 10. Cost-aware signal study (train / validation / holdout)
+
+`research/tune.py` was rewritten before this study. The old version selected
+its “winner” on the same later window it reported, ignored costs, had no
+frequency floor and applied config changes without a holdout. The new version
+uses three contiguous, non-overlapping windows and never lets the holdout
+influence selection.
+
+Command:
+
+```powershell
+python -m research.tune --timeframe M15 --offline
+```
+
+Split (XAUUSD dates shown; all symbols use the same bar indices):
+
+| Window | Dates | Bars per symbol |
+|---|---|---:|
+| Train | 2026-06-25 12:15 → 2026-08-26 06:15 | 3,838 |
+| Validation | 2026-08-26 06:30 → 2026-09-25 03:15 | 1,918 |
+| Holdout | 2026-09-25 03:30 → 2026-10-26 19:45 | 1,918 |
+
+The 300-bar warmup and the last 6 bars are outside the three windows. The
+search grid is fixed in advance: 5 weight presets (live plus trend-heavy,
+momentum-heavy, reversion-heavy and balanced) × 3 consensus thresholds
+(0.20/0.30/0.40) × 2 dead-market ratios (0.62/0.75) × 4 exit variants (live,
+no-partial, 4.0×ATR target, no trailing). After removing the duplicate of the
+live config, **119 challengers plus the live baseline** were tested.
+
+The study reuses the cached per-bar votes of the five quant agents. It tests
+reweighting, threshold, dead-market and exit changes; it does **not** retune
+the agents' indicator parameters and does **not** include Kronos or Gemini.
+Those remain part of the live path and are not covered by this holdout
+comparison.
+
+Every replay pays the same labelled costs as section 2: $7/lot round-turn
+commission, 2 points adverse slippage per fill, and spread floors of 20 points
+(XAUUSD), 8 (EURUSD), 10 (GBPUSD) and 8 (USDJPY). The frequency floor is
+**120 trades per 1,000 symbol-bars**; 89 of the 119 challengers cleared it on
+train. The top 12 by train net PnL advanced to validation. Train never chooses
+the winner; it only narrows the field.
+
+**Validation selection.** The highest validation net PnL that cleared the
+floor was `momentum_hi:thr0.40:dead0.75:live` (weights trend 0.9, momentum 1.3,
+reversion 0.3, breakout 1.0, pullback 0.6; threshold 0.40; dead-market 0.75):
+
+| Validation candidate | Trades | Net PnL | PF | USD/trade | Trades/1k bars |
+|---|---:|---:|---:|---:|---:|
+| Selected: momentum_hi, 0.40, dead 0.75, live exits | 1,112 | **−$40,687.20** | 0.77 | −$36.59 | 144.9 |
+| Live baseline | 1,329 | −$51,936.10 | 0.74 | −$39.08 | 173.2 |
+
+The selection looked like an improvement: less negative PnL, a slightly better
+PF and a better per-trade result than the live baseline.
+
+**One-shot holdout.** The winner and the live baseline were then replayed once
+on the untouched holdout:
+
+| Holdout configuration | Trades | Net PnL | PF | USD/trade | Trades/1k bars |
+|---|---:|---:|---:|---:|---:|
+| Selected: momentum_hi, 0.40, dead 0.75, live exits | 1,076 | **−$58,527.61** | 0.63 | −$54.39 | 140.3 |
+| Live baseline | 1,310 | −$63,907.59 | 0.64 | −$48.78 | 170.8 |
+
+The selected variant lost $5,379.98 less in total only because it traded less.
+Its per-trade expectancy and profit factor were **worse** than the baseline,
+so the validation improvement did not generalise into a better signal.
+
+| Holdout gate | Result |
+|---|---|
+| Frequency ≥ 120/1k bars | **PASS** (140.3) |
+| Expectancy > $0/trade | **FAIL** (−$54.39) |
+| Profit factor ≥ 1.05 | **FAIL** (0.63) |
+| Net PnL > $0 | **FAIL** (−$58,527.61) |
+| Beats baseline on PnL, expectancy and PF | **FAIL** (−$58.5k vs −$63.9k, −$54.39 vs −$48.78/trade, PF 0.63 vs 0.64) |
+
+`--apply` therefore wrote nothing: `config.json` was left unchanged. The
+machine-readable study is `state/tuning_result.json` (generated, untracked).
+The old full-sample measurement is still useful for execution-realism, but it
+is in-sample for the fixed config; the holdout table above is the relevant
+out-of-sample evidence for parameter changes.
+
+## 11. Verdict
 
 * The upgraded engine is causally correct and materially less optimistic.
 * The old XAUUSD backtest profit was dominated by impossible gap fills; a
@@ -273,6 +361,10 @@ metrics, and a no-lookahead equivalence check.
   (+$743.74 at the corrected cooldown); realistic costs make it −$15.6k.
 * After realistic costs, none of the four symbols shows an edge in this
   sample (aggregate PF 0.75).
+* The cost-aware holdout study selected a momentum-heavy, higher-threshold
+  variant that lost less in total by trading less, but was worse per trade and
+  had a lower PF than the live baseline. Every profit gate failed, so no
+  setting was applied.
 * Keep the system in PAPER/dry-run. The next useful work is signal quality and
   cost-aware exits measured through the live funnel, not another promotion
   attempt.
