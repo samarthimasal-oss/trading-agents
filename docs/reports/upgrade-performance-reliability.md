@@ -14,7 +14,7 @@ real-data funnel analytics, and a causal research backtest. No live promotion.
 | 3 | `a88a920` | Real-data funnel: `evaluations` journal (one row per stage per symbol per closed bar), `GET /funnel`, Signal Funnel dashboard with rejection reasons and bot-only closed trades |
 | 4 | `578f636` | Research backtest realism: next-bar fills, bid/ask spread, gap-through fills, SL-before-TP, round-turn commission, exit slippage, spread floor, no pre-entry stop management, M5/M15 caches and cooldown scaling, extended metrics, before/after measurement |
 | 5 | `a71bb1d` | Live-management parity: 1R partial close with broker-step volume, commission on both legs, forced breakeven, trailing step, optional time stop; measurement rerun |
-| 6 | this branch tip | Cost-aware tuning: chronological train/validation/holdout split, labelled costs, frequency floor, validation-only selection, one-shot holdout gates. The study found no promotable change |
+| 6 | this branch tip | Cost-aware tuning: chronological train/validation/holdout split, labelled costs, frequency floor, validation-only selection, one-shot holdout gates, and a primary-symbol gate. The study found no promotable change; its aggregate winner had actually worsened XAUUSD |
 
 The live runner still uses the five quant agents + Kronos + Gemini advisory
 review + risk guardian. No mandatory filter was added, so the signal path is
@@ -270,7 +270,7 @@ legs, trailing step, time stop, M5/M15 cooldown and cache paths, extended
 metrics, and a no-lookahead equivalence check. The 20 tuner tests cover split
 boundaries/non-overlap, exit variants, cost overrides, frequency floors,
 validation-only selection, holdout-once evaluation, the profit gates and the
-gated config write. The full Python suite is **257 tests**.
+gated config write. The full Python suite is **260 tests**.
 
 ## 10. Cost-aware signal study (train / validation / holdout)
 
@@ -338,6 +338,38 @@ The selected variant lost $5,379.98 less in total only because it traded less.
 Its per-trade expectancy and profit factor were **worse** than the baseline,
 so the validation improvement did not generalise into a better signal.
 
+**XAUUSD is the primary symbol, and the aggregate hid a regression there.**
+Per-symbol holdout results:
+
+| Symbol | Winner trades | Winner net PnL | Winner PF | Winner USD/trade | Baseline net PnL | Baseline PF | Baseline USD/trade |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| **XAUUSD** | 287 | **−$12,345.95** | 0.83 | **−$43.02** | **−$8,151.12** | 0.89 | **−$25.96** |
+| EURUSD | 249 | −$13,825.65 | 0.51 | −$55.52 | −$17,109.96 | 0.50 | −$52.16 |
+| GBPUSD | 257 | −$11,401.26 | 0.53 | −$44.36 | −$14,192.34 | 0.51 | −$43.94 |
+| USDJPY | 283 | −$20,954.75 | 0.37 | −$74.05 | −$24,454.17 | 0.37 | −$70.88 |
+| **Aggregate** | 1,076 | −$58,527.61 | 0.63 | −$54.39 | −$63,907.59 | 0.64 | −$48.78 |
+
+The winner made XAUUSD **$4,194.83 worse** in total and $17.06 worse per
+trade than the live baseline. The aggregate improvement came entirely from
+EURUSD/GBPUSD/USDJPY trading less; every symbol still lost money. Aggregate-only
+gates can therefore approve a change that degrades the primary symbol,
+so `research.tune.py` now adds a **primary-symbol gate**: the configured
+primary symbol (XAUUSD) must be net positive on the holdout, beat the baseline
+on net PnL, and beat it on per-trade expectancy. Per-symbol rows now carry
+`avg_pnl_per_trade`, and `_expectancy()` falls back to `pnl/trades` so older
+result files are read correctly.
+
+**Per-agent horizon diagnostic.** `python -m research.horizon_edges` (read-only;
+fixed 60/40 train/validate split, no costs or holdout) was run to check whether
+any agent has a stable directional edge on XAUUSD. None does: trend's
+confidence-weighted edge is +0.03 to +0.25 ATR across 2–24 bars on train but
+−0.04 to +0.03 ATR on validation; pullback goes from +0.02…+0.11 to
+−0.03…−0.23; reversion is negative on train and mostly positive at short
+horizons on validation. The signs flip, so the diagnostic does not justify
+reweighting an individual agent. It also cannot see costs, so a positive
+pre-cost edge at 2–4 bars would not survive the spread floor. This is
+consistent with the holdout result: the problem is not the weight vector alone.
+
 | Holdout gate | Result |
 |---|---|
 | Frequency ≥ 120/1k bars | **PASS** (140.3) |
@@ -345,6 +377,7 @@ so the validation improvement did not generalise into a better signal.
 | Profit factor ≥ 1.05 | **FAIL** (0.63) |
 | Net PnL > $0 | **FAIL** (−$58,527.61) |
 | Beats baseline on PnL, expectancy and PF | **FAIL** (−$58.5k vs −$63.9k, −$54.39 vs −$48.78/trade, PF 0.63 vs 0.64) |
+| Primary symbol positive and beats baseline | **FAIL** (XAUUSD −$12,345.95 vs −$8,151.12; −$43.02 vs −$25.96/trade) |
 
 `--apply` therefore wrote nothing: `config.json` was left unchanged. The
 machine-readable study is `state/tuning_result.json` (generated, untracked).
@@ -364,7 +397,10 @@ out-of-sample evidence for parameter changes.
 * The cost-aware holdout study selected a momentum-heavy, higher-threshold
   variant that lost less in total by trading less, but was worse per trade and
   had a lower PF than the live baseline. Every profit gate failed, so no
-  setting was applied.
+  setting was applied. Its aggregate improvement also **worsened XAUUSD** by
+  $4,194.83, which is why the tuner now gates on the primary symbol.
+* The per-agent horizon scan found no stable XAUUSD edge across train and
+  validation; agent signs flip, so reweighting alone is not the next fix.
 * Keep the system in PAPER/dry-run. The next useful work is signal quality and
   cost-aware exits measured through the live funnel, not another promotion
   attempt.

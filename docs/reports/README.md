@@ -45,8 +45,12 @@ train/validation/holdout split and 119 challengers plus the live baseline.
 The validation winner (momentum-heavy, threshold 0.40, dead-market 0.75) lost
 -$58,527.61 with PF 0.63 on the untouched holdout, versus the baseline's
 -$63,907.59 and PF 0.64. It lost less in total only by trading less; per-trade
-expectancy and PF were worse. Every profit gate failed, so `config.json` was
-not changed. Details and the full gate table are in section 10 of the report.
+expectancy and PF were worse. It also **worsened the primary symbol**: XAUUSD
+lost -$12,345.95 (PF 0.83, -$43.02/trade) versus the baseline's -$8,151.12
+(PF 0.89, -$25.96/trade). Every profit gate failed and the new primary-symbol
+gate failed too, so `config.json` was not changed. A per-agent horizon scan
+found no stable XAUUSD edge across train and validation. Details and the full
+gate table are in section 10 of the report.
 
 ## Phase 3 EA Strategy Tester runs
 

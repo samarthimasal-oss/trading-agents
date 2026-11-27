@@ -109,6 +109,8 @@ def row_from(metrics: dict, trades: list[dict]) -> dict:
         "profit_factor": metrics["profit_factor"],
         "max_drawdown": metrics["max_drawdown"],
         "avg_r": metrics.get("avg_r"),
+        "avg_pnl_per_trade": (round(metrics["pnl"] / metrics["trades"], 2)
+                              if metrics["trades"] else 0.0),
         "wins": sum(1 for p in pnls if p > 0),
         "gross_win": sum(p for p in pnls if p > 0),
         "gross_loss": abs(sum(p for p in pnls if p <= 0)),

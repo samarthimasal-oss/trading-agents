@@ -195,6 +195,24 @@ def test_holdout_gates_read_the_aggregate_expectancy_key():
     assert by_name["holdout_expectancy"].passed
 
 
+def test_expectancy_falls_back_to_pnl_over_trades():
+    # older per-symbol rows only carried pnl and trades
+    assert tune._expectancy({"trades": 4, "pnl": -10.0}) == -2.5
+    assert tune._expectancy({"trades": 0, "pnl": 10.0}) == 0.0
+    # an explicit key always wins
+    assert tune._expectancy({"trades": 4, "pnl": -10.0,
+                             "avg_pnl_per_trade": 1.5}) == 1.5
+
+
+def test_row_from_carries_per_trade_expectancy():
+    from research.measure_upgrade import row_from
+
+    row = row_from({"trades": 4, "pnl": -10.0, "win_rate_pct": 25.0,
+                    "profit_factor": 0.5, "max_drawdown": 12.0,
+                    "avg_r": -0.1}, [])
+    assert row["avg_pnl_per_trade"] == -2.5
+
+
 @pytest.mark.parametrize("field,value,gate_name", [
     ("expectancy_usd", -1.0, "holdout_expectancy"),
     ("profit_factor", 1.00, "holdout_profit_factor"),
@@ -239,6 +257,34 @@ def test_holdout_gate_rejects_pnl_improvement_from_trading_less():
     by_name = {gate.name: gate for gate in gates}
     assert by_name["holdout_frequency"].passed
     assert not by_name["holdout_beats_baseline"].passed
+
+
+def test_holdout_primary_symbol_gate_requires_xauusd_improvement():
+    aggregate = {"trades": 200, "pnl": 500.0,
+                 "profit_factor": 1.20, "avg_pnl_per_trade": 2.5}
+    base_aggregate = {"trades": 200, "pnl": 100.0,
+                      "profit_factor": 1.05, "avg_pnl_per_trade": 0.5}
+    winner = {"bars": 1000, "metrics": aggregate,
+              "symbols": {"XAUUSD": {"trades": 100, "pnl": -100.0,
+                                     "avg_pnl_per_trade": -1.0}}}
+    baseline = {"bars": 1000, "metrics": base_aggregate,
+                "symbols": {"XAUUSD": {"trades": 100, "pnl": -50.0,
+                                       "avg_pnl_per_trade": -0.5}}}
+    gates = tune.holdout_gates(winner, baseline,
+                               min_trades_per_1000_bars=120.0,
+                               primary_symbol="XAUUSD")
+    by_name = {gate.name: gate for gate in gates}
+    assert not by_name["holdout_primary_symbol"].passed
+
+    winner["symbols"]["XAUUSD"] = {"trades": 100, "pnl": 200.0,
+                                   "avg_pnl_per_trade": 2.0}
+    baseline["symbols"]["XAUUSD"] = {"trades": 100, "pnl": 100.0,
+                                     "avg_pnl_per_trade": 1.0}
+    gates = tune.holdout_gates(winner, baseline,
+                               min_trades_per_1000_bars=120.0,
+                               primary_symbol="XAUUSD")
+    by_name = {gate.name: gate for gate in gates}
+    assert by_name["holdout_primary_symbol"].passed
 
 
 # ------------------------------------------------------------- study loop

@@ -354,6 +354,9 @@ def _expectancy(metrics: dict) -> float:
     value = metrics.get("avg_pnl_per_trade")
     if value is None:
         value = metrics.get("expectancy_usd")
+    if value is None:
+        trades = int(metrics.get("trades") or 0)
+        value = (float(metrics.get("pnl") or 0.0) / trades) if trades else 0.0
     return float(value or 0.0)
 
 
@@ -394,6 +397,7 @@ def holdout_gates(
     min_trades_per_1000_bars: float,
     min_profit_factor: float = MIN_HOLDOUT_PF,
     min_expectancy_usd: float = 0.0,
+    primary_symbol: str | None = None,
 ) -> list[Gate]:
     metrics = winner.get("metrics") or {}
     trades = int(metrics.get("trades") or 0)
@@ -429,6 +433,27 @@ def holdout_gates(
             f"${pnl:+.2f} vs ${base_pnl:+.2f}, "
             f"${expectancy:+.2f}/trade vs ${base_expectancy:+.2f}, "
             f"PF {profit_factor:.2f} vs {base_pf:.2f}"))
+    if primary_symbol:
+        key = str(primary_symbol).upper()
+        winner_symbol = (winner.get("symbols") or {}).get(key)
+        baseline_symbol = ((baseline or {}).get("symbols") or {}).get(key)
+        if winner_symbol is None or baseline_symbol is None:
+            gates.append(Gate(
+                "holdout_primary_symbol", False,
+                f"{key} is missing from the holdout rows"))
+        else:
+            symbol_pnl = float(winner_symbol.get("pnl") or 0.0)
+            base_symbol_pnl = float(baseline_symbol.get("pnl") or 0.0)
+            symbol_expectancy = _expectancy(winner_symbol)
+            base_symbol_expectancy = _expectancy(baseline_symbol)
+            passed = (symbol_pnl > 0.0 and symbol_pnl > base_symbol_pnl
+                      and symbol_expectancy > base_symbol_expectancy)
+            gates.append(Gate(
+                "holdout_primary_symbol", passed,
+                f"{key} ${symbol_pnl:+.2f} vs baseline "
+                f"${base_symbol_pnl:+.2f}, "
+                f"${symbol_expectancy:+.2f}/trade vs "
+                f"${base_symbol_expectancy:+.2f}"))
     return gates
 
 
@@ -467,6 +492,7 @@ def run_study(
     min_trades_per_1000_bars: float = MIN_TRADES_PER_1000_BARS,
     min_holdout_pf: float = MIN_HOLDOUT_PF,
     min_holdout_expectancy: float = 0.0,
+    primary_symbol: str | None = None,
     evaluate_fn=evaluate_window,
 ) -> dict:
     """Train screen -> validation selection -> one-shot holdout gates."""
@@ -537,7 +563,8 @@ def run_study(
             holdout[winner_candidate.label], baseline_holdout,
             min_trades_per_1000_bars=min_trades_per_1000_bars,
             min_profit_factor=min_holdout_pf,
-            min_expectancy_usd=min_holdout_expectancy)
+            min_expectancy_usd=min_holdout_expectancy,
+            primary_symbol=primary_symbol)
 
     return {
         "split": split,
@@ -647,6 +674,9 @@ def main() -> None:
                 for symbol in args.symbols.split(",") if symbol.strip()]
                if args.symbols else
                [str(symbol).upper() for symbol in cfg["trading"]["symbols"]])
+    primary_symbol = str(cfg["trading"].get("symbol") or "").upper() or None
+    if primary_symbol not in symbols:
+        primary_symbol = None
 
     caches: dict[str, dict] = {}
     for symbol in symbols:
@@ -681,13 +711,16 @@ def main() -> None:
               {symbol: floor_for(costs, symbol) for symbol in symbols}))
     print(f"candidates: {len(candidates)} challengers + live baseline | "
           f"frequency floor {args.min_trades_per_1000_bars:.1f}/1k bars")
+    if primary_symbol:
+        print(f"primary symbol gate: {primary_symbol}")
 
     result = run_study(
         caches, cfg, split, candidates=candidates, symbols=symbols,
         timeframe=timeframe, costs=costs, top_k=args.top_k,
         min_trades_per_1000_bars=args.min_trades_per_1000_bars,
         min_holdout_pf=args.min_holdout_pf,
-        min_holdout_expectancy=args.min_holdout_expectancy)
+        min_holdout_expectancy=args.min_holdout_expectancy,
+        primary_symbol=primary_symbol)
 
     _print_rows("TRAIN SURVIVORS (highest train PnL that cleared the floor)",
                 result["advancing"])
@@ -715,6 +748,7 @@ def main() -> None:
         "generated": time.strftime("%Y-%m-%d %H:%M"),
         "timeframe": timeframe,
         "symbols": symbols,
+        "primary_symbol": primary_symbol,
         "split": asdict(split),
         "split_dates": _split_dates(caches[symbols[0]]["df"], split),
         "costs": {key: value for key, value in costs.items()

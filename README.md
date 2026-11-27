@@ -55,8 +55,9 @@ and M5/M15 caches. The 2026-11-26 measurement found that the old engine booked
 $23,303 of stops better than the bar open; after correcting that and charging
 labelled costs, all four symbols are negative (aggregate -$169,409, PF 0.75),
 so nothing is promoted. A follow-up cost-aware train/validation/holdout study
-of 119 challengers also failed every profit gate on the untouched holdout;
-`config.json` was not changed. Full numbers and caveats:
+of 119 challengers also failed every profit gate on the untouched holdout, and
+its aggregate winner worsened XAUUSD, so the tuner now also gates on the
+primary symbol; `config.json` was not changed. Full numbers and caveats:
 [`docs/reports/upgrade-performance-reliability.md`](docs/reports/upgrade-performance-reliability.md).
 
 ```
@@ -347,8 +348,10 @@ commission/slippage/spread floors as the replay, enforces a frequency floor
 only, and evaluates the untouched holdout once for the winner and the live
 baseline. `--apply` writes `config.json` (with a `.bak_pre_tune` backup) only
 if the holdout has positive expectancy, PF >= 1.05, enough frequency and
-better PnL, expectancy and PF than the baseline. The 2026-11-26 study failed
-those gates, so the live config was not changed; results are in
+better PnL, expectancy and PF than the baseline, **and** the configured
+primary symbol (XAUUSD) is positive and beats the baseline on PnL and
+expectancy. The 2026-11-26 study failed those gates — its aggregate winner
+worsened XAUUSD — so the live config was not changed; results are in
 `state/tuning_result.json` and section 10 of the performance report.
 
 `research/measure_upgrade.py` replays the same cached votes through the engine
