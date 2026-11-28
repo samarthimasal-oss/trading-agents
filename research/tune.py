@@ -38,6 +38,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.config_schema import validate_config                 # noqa: E402
 from research import backtest as bt                            # noqa: E402
+from research import manifest as repro                         # noqa: E402
 from research.measure_upgrade import (                         # noqa: E402
     DEFAULT_COSTS, floor_for, row_from, summarize,
 )
@@ -697,6 +698,18 @@ def main() -> None:
         spread_points=args.spread_points,
         start_equity=args.start_equity)
     candidates, baseline = build_candidates(cfg)
+    data_manifest = {
+        symbol: repro.data_summary(
+            cache["df"], source_path=bt.bars_path(symbol, timeframe), root=ROOT)
+        for symbol, cache in caches.items()
+    }
+    input_manifest = {
+        "symbol_settings": repro.file_summary(
+            os.path.join(STATE, "bt_settings.json"), root=ROOT),
+        **{f"{symbol}_signal_cache": repro.file_summary(
+            bt.signals_path(symbol, timeframe), root=ROOT)
+            for symbol in symbols},
+    }
 
     print(f"bars: {n_bars} | timeframe {timeframe} | symbols "
           f"{','.join(symbols)}")
@@ -777,6 +790,19 @@ def main() -> None:
         "suggestion": suggestion,
         "applied": False,
         "reason": result.get("reason", ""),
+        "manifest": repro.build_manifest(
+            timeframe=timeframe, symbols=symbols, data=data_manifest,
+            config=cfg, root=ROOT, costs=costs, split=asdict(split),
+            parameters={
+                "days": args.days, "top_k": args.top_k,
+                "min_trades_per_1000_bars": args.min_trades_per_1000_bars,
+                "min_holdout_pf": args.min_holdout_pf,
+                "min_holdout_expectancy": args.min_holdout_expectancy,
+                "offline": bool(args.offline),
+                "apply_requested": bool(args.apply),
+                "primary_symbol": primary_symbol,
+            },
+            inputs=input_manifest),
     }
     os.makedirs(os.path.dirname(args.out) or STATE, exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as handle:

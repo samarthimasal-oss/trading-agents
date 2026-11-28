@@ -37,6 +37,7 @@ import time
 import numpy as np
 
 from research import backtest as bt
+from research import manifest as repro
 
 DEFAULT_COSTS = {
     "commission_per_lot_round_turn": 7.0,
@@ -220,6 +221,10 @@ def main() -> int:
         "results": {},
         "aggregate": {},
     }
+    data_manifest: dict[str, dict] = {}
+    input_manifest = {
+        "symbol_settings": repro.file_summary(
+            os.path.join(bt.STATE, "bt_settings.json"), root=bt.ROOT)}
 
     for symbol in symbols:
         try:
@@ -228,6 +233,10 @@ def main() -> int:
             print(f"skip {symbol}: no cached signals for {timeframe}")
             continue
         df = cache["df"]
+        data_manifest[symbol] = repro.data_summary(
+            df, source_path=bt.bars_path(symbol, timeframe), root=bt.ROOT)
+        input_manifest[f"{symbol}_signal_cache"] = repro.file_summary(
+            bt.signals_path(symbol, timeframe), root=bt.ROOT)
         info = bt.symbol_settings(symbol)
         base_cfg = json.loads(json.dumps(cfg))
         base_cfg["risk"]["_symbol"] = symbol
@@ -304,6 +313,17 @@ def main() -> int:
               " avg/trade=%+7.2f"
               % (label, agg["trades"], agg["pnl"], agg["win_rate_pct"],
                  agg["profit_factor"], agg["avg_pnl_per_trade"]))
+
+    report["manifest"] = repro.build_manifest(
+        timeframe=timeframe, symbols=list(report["results"]),
+        data=data_manifest, config=cfg, root=bt.ROOT, costs=settings,
+        parameters={
+            "baseline_ref": args.baseline_ref,
+            "commission": args.commission,
+            "slippage": args.slippage,
+            "spread": args.spread,
+        },
+        inputs=input_manifest)
 
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as handle:

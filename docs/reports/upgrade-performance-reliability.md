@@ -1,7 +1,8 @@
 # Performance & reliability upgrade — measurement report
 
-**Date:** 2026-11-26  
-**Branch:** `upgrade/performance-reliability`  
+**Date:** 2026-11-26<br>
+**Last updated:** 2026-11-28 (reproducibility manifest; the 2026-11-26 measurements are unchanged)<br>
+**Branch:** `upgrade/performance-reliability`<br>
 **Scope:** XAUUSD-first signal reliability, broker-accurate sizing/execution,
 real-data funnel analytics, and a causal research backtest. No live promotion.
 
@@ -15,6 +16,7 @@ real-data funnel analytics, and a causal research backtest. No live promotion.
 | 4 | `578f636` | Research backtest realism: next-bar fills, bid/ask spread, gap-through fills, SL-before-TP, round-turn commission, exit slippage, spread floor, no pre-entry stop management, M5/M15 caches and cooldown scaling, extended metrics, before/after measurement |
 | 5 | `a71bb1d` | Live-management parity: 1R partial close with broker-step volume, commission on both legs, forced breakeven, trailing step, optional time stop; measurement rerun |
 | 6 | this branch tip | Cost-aware tuning: chronological train/validation/holdout split, labelled costs, frequency floor, validation-only selection, one-shot holdout gates, and a primary-symbol gate. The study found no promotable change; its aggregate winner had actually worsened XAUUSD |
+| 7 | this branch tip | Reproducibility: every research report embeds a manifest with data, config, signal-cache, cost and code hashes; fixed the offline backtest CLI crash in the agent-scoring block |
 
 The live runner still uses the five quant agents + Kronos + Gemini advisory
 review + risk guardian. No mandatory filter was added, so the signal path is
@@ -53,6 +55,36 @@ Common replay settings: 300-bar warmup, 0.5% risk per trade, no fixed lot,
 2.5× notional leverage cap, max 1 position per symbol. The four symbols were
 replayed independently on their own 100,000 USD account; the aggregate is a
 sum, **not** a portfolio simulation (live concurrency is capped separately).
+
+### Reproducibility manifest
+
+Reports written by `research/backtest.py`, `research/tune.py` and
+`research/measure_upgrade.py` now embed a `manifest` block. It records:
+
+* `data.<symbol>.sha256` — hash of the replayed OHLCV/spread fields, plus the
+  relative source CSV, byte size and source-file hash;
+* `inputs` — hashes of the signal cache and `state/bt_settings.json`;
+* `config.sha256` — hash of the full config (values are never written);
+* `code.commit`, `dirty` and `source_sha256` — git identity plus a source-tree
+  hash that also covers uncommitted edits;
+* `costs`/`costs_sha256`, `split`, run `parameters`, and the Python/NumPy/pandas
+  versions.
+
+Check a report against the current checkout with:
+
+```python
+import json
+from research import manifest
+report = json.load(open("state/backtest_report.json"))
+data = report["manifest"]["data"]["XAUUSD"]
+print(manifest.sha256_file("state/bt_XAUUSD.csv") == data["source_sha256"])
+```
+
+A report is reproducible only when the data and source hashes match;
+`dirty: true` identifies an uncommitted tree rather than a commit. While adding
+this, the offline backtest CLI crashed before writing its report because the
+agent-scoring block referenced an undefined local. The block now filters
+per-agent samples through `symbol_agent_scores()`, with a regression test.
 
 ### Cost assumptions (labelled, not realised fills)
 
@@ -267,10 +299,12 @@ gap-through stops, SL-before-TP, spread floor, commission drag, round-down
 sizing, minimum-lot rejection, fixed-lot risk cap, no management before the
 entry bar closes, partial close at 1R, forced breakeven, commission on both
 legs, trailing step, time stop, M5/M15 cooldown and cache paths, extended
-metrics, and a no-lookahead equivalence check. The 20 tuner tests cover split
+metrics, and a no-lookahead equivalence check. The 23 tuner tests cover split
 boundaries/non-overlap, exit variants, cost overrides, frequency floors,
-validation-only selection, holdout-once evaluation, the profit gates and the
-gated config write. The full Python suite is **260 tests**.
+validation-only selection, holdout-once evaluation, the profit and
+primary-symbol gates and the gated config write. The manifest tests cover hash
+stability, secret-free config hashing, relative paths and missing inputs. The
+full Python suite is **267 tests**.
 
 ## 10. Cost-aware signal study (train / validation / holdout)
 
@@ -380,10 +414,12 @@ consistent with the holdout result: the problem is not the weight vector alone.
 | Primary symbol positive and beats baseline | **FAIL** (XAUUSD −$12,345.95 vs −$8,151.12; −$43.02 vs −$25.96/trade) |
 
 `--apply` therefore wrote nothing: `config.json` was left unchanged. The
-machine-readable study is `state/tuning_result.json` (generated, untracked).
-The old full-sample measurement is still useful for execution-realism, but it
-is in-sample for the fixed config; the holdout table above is the relevant
-out-of-sample evidence for parameter changes.
+machine-readable study is `state/tuning_result.json` (generated, untracked);
+its `manifest` block records the four CSV and signal-cache hashes, the config
+hash, the source tree, costs and the exact split. The old full-sample
+measurement is still useful for execution-realism, but it is in-sample for the
+fixed config; the holdout table above is the relevant out-of-sample evidence
+for parameter changes.
 
 ## 11. Verdict
 
@@ -401,6 +437,9 @@ out-of-sample evidence for parameter changes.
   $4,194.83, which is why the tuner now gates on the primary symbol.
 * The per-agent horizon scan found no stable XAUUSD edge across train and
   validation; agent signs flip, so reweighting alone is not the next fix.
+* Research reports now carry a manifest (data/config/signal-cache/code hashes),
+  so a result can be tied back to the exact inputs and source tree. The
+  offline backtest CLI bug that prevented report writing is fixed.
 * Keep the system in PAPER/dry-run. The next useful work is signal quality and
   cost-aware exits measured through the live funnel, not another promotion
   attempt.

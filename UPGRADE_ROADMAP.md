@@ -621,7 +621,7 @@ A strategy/config/model change is promoted only if:
 
 - [ ] `python main.py check` passes; XAUUSD valid; invalid symbols quarantined.
 - [ ] `pytest` green; coverage reported for critical modules.
-- [ ] Backtest report reproducible from a manifest (data hash, config hash, code hash).
+- [x] Backtest report reproducible from a manifest (data hash, config hash, code hash). Reports from `research/backtest.py`, `research/tune.py` and `research/measure_upgrade.py` embed a `manifest` with content hashes, config SHA-256, signal-cache/input hashes, git commit + dirty source-tree hash, costs, split and environment; config values and absolute paths are never written.
 - [ ] Walk-forward and holdout results documented, including failures.
 - [ ] EA compiles clean; Strategy Tester report archived.
 - [ ] Demo dry-run and demo live verified; reconciliation matches.

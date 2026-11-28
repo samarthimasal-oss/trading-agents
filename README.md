@@ -57,7 +57,8 @@ labelled costs, all four symbols are negative (aggregate -$169,409, PF 0.75),
 so nothing is promoted. A follow-up cost-aware train/validation/holdout study
 of 119 challengers also failed every profit gate on the untouched holdout, and
 its aggregate winner worsened XAUUSD, so the tuner now also gates on the
-primary symbol; `config.json` was not changed. Full numbers and caveats:
+primary symbol; `config.json` was not changed. Research reports now embed
+data/config/code manifests for reproducibility. Full numbers and caveats:
 [`docs/reports/upgrade-performance-reliability.md`](docs/reports/upgrade-performance-reliability.md).
 
 ```
@@ -359,6 +360,15 @@ at a chosen baseline commit and the current engine, and reports the fill-model
 bias. The 2026-11-26 run is in
 [`docs/reports/upgrade-performance-reliability.md`](docs/reports/upgrade-performance-reliability.md).
 
+Every report from these tools embeds a `manifest`: content hashes for the bars
+and signal cache, a SHA-256 of the config (never its values), the git commit and
+a source-tree hash that also covers dirty worktrees, plus costs, split and
+environment. A result is reproducible only when the data and source hashes
+match; `dirty: true` identifies uncommitted code. The offline backtest CLI now
+writes its report again (the agent-scoring block previously crashed on an
+undefined local). Manifest tests cover hash stability, secret-free config
+hashing, relative paths and missing inputs.
+
 ## 7. Native MQL5 EA (PAPER by default)
 
 `mql5/` contains the Expert Advisor and its modules:
@@ -471,6 +481,7 @@ python main.py status                      # account, positions, journal
 
 Research tooling lives in `research/`: `backtest.py` (full replay engine with
 per-timeframe caches), `tune.py` (cost-aware train/validation/holdout study),
+`manifest.py` (data/config/code hashes embedded in reports),
 `horizon_edges.py` (per-agent horizon sweeps), and `measure_upgrade.py`
 (baseline/current fill-model comparison). The top-level `backtest.py` remains
 the CLI facade. `demo_1min.csv` is a synthetic fixture for determinism tests,

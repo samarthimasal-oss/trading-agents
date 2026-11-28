@@ -40,6 +40,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agents import quant                                     # noqa: E402
 from agents.kronos_agent import forecast_signal              # noqa: E402
+from research import manifest as repro                        # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATE = os.path.join(ROOT, "state")
@@ -779,6 +780,16 @@ def agent_scores(samples: list[tuple]) -> dict:
     return out
 
 
+def symbol_agent_scores(symbol: str, samples: list[tuple],
+                        names: list[str] | None = None) -> dict:
+    """Score per-agent samples for one symbol, ignoring consensus rows."""
+    allowed = set(names or [ag.name for ag in quant.AGENTS])
+    rows = [(symbol, sample[1], sample[2], sample[3], sample[4],
+             sample[5], sample[6])
+            for sample in samples if sample[2] in allowed]
+    return agent_scores(rows)
+
+
 # ================================================================== full live-like runner (used for the headline report)
 def run_symbol_full(symbol: str, df: pd.DataFrame, info: dict, cfg: dict,
                     kronos_stride: int = 0, timeframe: str = "M15",
@@ -882,10 +893,13 @@ def main():
                   "start_equity": args.start_equity,
               },
               "symbols": {}, "agents": {}}
+    data_manifest: dict[str, dict] = {}
     for symbol in symbols:
         print(f"== {symbol} {timeframe} ==", flush=True)
         bars = load_bars(symbol, args.days, timeframe=timeframe,
                          offline=args.offline)
+        data_manifest[symbol] = repro.data_summary(
+            bars, source_path=bars_path(symbol, timeframe), root=ROOT)
         min_bars = max(700, int(args.bars_history) + 100)
         if len(bars) < min_bars:
             raise SystemExit(
@@ -919,15 +933,25 @@ def main():
                  m["profit_factor"], m["max_drawdown"],
                  m["expectancy_usd"], by_why), flush=True)
         # agent-level scores from the same causal samples the replay produced
-        samples = [(symbol, t[1], t[2], t[3], t[4], t[5], t[6])
-                   for t in res["samples"] if t[2] in names]
-        scores = agent_scores(samples)
+        scores = symbol_agent_scores(symbol, res["samples"])
         report["agents"] = {**report["agents"],
                             **{f"{symbol}:{k}": v for k, v in scores.items()}}
     report["aggregate_pnl"] = round(
         sum(v["metrics"]["pnl"] for v in report["symbols"].values()), 2)
     report["aggregate_trades"] = sum(
         v["metrics"]["trades"] for v in report["symbols"].values())
+    report["manifest"] = repro.build_manifest(
+        timeframe=timeframe, symbols=symbols, data=data_manifest, config=cfg,
+        root=ROOT,
+        costs={symbol: report["symbols"][symbol]["costs"]
+               for symbol in report["symbols"]},
+        parameters={"days": args.days, "kronos_stride": args.kronos_stride,
+                    "bars_history": args.bars_history,
+                    "offline": bool(args.offline),
+                    "start_equity": args.start_equity,
+                    "cost_overrides": report["cost_overrides"]},
+        inputs={"symbol_settings": repro.file_summary(
+            os.path.join(STATE, "bt_settings.json"), root=ROOT)})
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as fh:
         json.dump(report, fh, default=str, indent=1)

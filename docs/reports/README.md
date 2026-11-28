@@ -49,8 +49,10 @@ expectancy and PF were worse. It also **worsened the primary symbol**: XAUUSD
 lost -$12,345.95 (PF 0.83, -$43.02/trade) versus the baseline's -$8,151.12
 (PF 0.89, -$25.96/trade). Every profit gate failed and the new primary-symbol
 gate failed too, so `config.json` was not changed. A per-agent horizon scan
-found no stable XAUUSD edge across train and validation. Details and the full
-gate table are in section 10 of the report.
+found no stable XAUUSD edge across train and validation. Every research report
+now embeds a manifest with data, config, signal-cache and code hashes, so a
+result can be tied back to its exact inputs; details and the full gate table
+are in section 10 of the report.
 
 ## Phase 3 EA Strategy Tester runs
 

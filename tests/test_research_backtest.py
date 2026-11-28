@@ -424,3 +424,17 @@ def test_metrics_output_is_json_serialisable():
     m = bt.metrics([], [100.0, 101.0], timeframe="M15", start_equity=100.0)
     payload = json.dumps(m)
     assert json.loads(payload)["timeframe"] == "M15"
+
+
+def test_symbol_agent_scores_ignore_consensus_rows():
+    samples = [
+        ("XAUUSD", "t0", "consensus", 1, 0.8, 0.0, 0),
+        ("XAUUSD", "t0", "trend", 1, 0.5, 0.5, 1),
+        ("XAUUSD", "t0", "momentum", -1, 0.4, -0.3, -1),
+        ("XAUUSD", "t0", "trend", 0, 0.2, 0.1, 0),
+    ]
+    scores = bt.symbol_agent_scores("XAUUSD", samples)
+    assert set(scores) == {"trend", "momentum"}
+    assert scores["trend"]["n"] == 1
+    assert scores["trend"]["hit_pct"] == 100.0
+    assert scores["momentum"]["edge_atr"] == 0.3
