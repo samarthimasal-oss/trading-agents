@@ -1,7 +1,7 @@
 # Performance & reliability upgrade — measurement report
 
 **Date:** 2026-11-26<br>
-**Last updated:** 2026-11-28 (reproducibility manifest; the 2026-11-26 measurements are unchanged)<br>
+**Last updated:** 2026-11-28 (release verification: 277 tests, frontend build, secret audit, rollback drills, EA compile, bounded dry-run)<br>
 **Branch:** `upgrade/performance-reliability`<br>
 **Scope:** XAUUSD-first signal reliability, broker-accurate sizing/execution,
 real-data funnel analytics, and a causal research backtest. No live promotion.
@@ -443,3 +443,50 @@ for parameter changes.
 * Keep the system in PAPER/dry-run. The next useful work is signal quality and
   cost-aware exits measured through the live funnel, not another promotion
   attempt.
+
+## 12. Release verification (2026-11-28)
+
+All checks below were run on this branch. MT5 was connected to the demo account
+(login 5057915388, equity 100,142.95) and the system stayed in PAPER/dry-run.
+
+| Check | Command | Result |
+|---|---|---|
+| Python suite | `python -m pytest` | **277 passed** in 16.5s |
+| Coverage | `python -m pytest --cov=core --cov=execution --cov=research --cov=api --cov=runner --cov=main` | **62% total**; risk/execution modules 67–94%, funnel service 93% |
+| Frontend suite | `npm run test:run` (web/) | **30 passed** |
+| Frontend build | `npm run build` (web/) | **pass** (2,074 modules) |
+| Secret audit | `python scripts/audit_secrets.py` | 20 commits, 282 tracked files, 8 logs; **0 credential hits**, 0 sensitive tracked files |
+| Rollback drills | `pytest tests/test_rollback.py` | config backup and guardian SQLite restore pass |
+| EA compile | `scripts\install_ea.ps1 -Compile` | **0 errors, 0 warnings** (10 includes + EA copied) |
+| EA bridge | `python main.py ea-server --seconds 10` | bound `127.0.0.1:8765`, stopped cleanly, exit 0; `ea.enabled=false` |
+| MT5 check | `python main.py check` | exit 0; demo account; XAUUSD, EURUSD, GBPUSD, USDJPY valid |
+| Bounded dry-run | `python main.py run --dry-run --once` | exit 0; 16 funnel rows; no orders sent |
+
+### Bounded dry-run evidence
+
+`run` now accepts `--seconds N` (deadline) and `--once` (single cycle), so a
+smoke test no longer needs an external kill. The 2026-11-28 cycle produced a
+complete funnel:
+
+| Symbol | Funnel result |
+|---|---|
+| XAUUSD | `signal/reject`: quote quarantined, spread 262 pts > 80 pts |
+| EURUSD | `signal/reject`: no consensus (strength +0.04) |
+| GBPUSD | signal → gemini approve → risk pass → `execution/skip`: dry run |
+| USDJPY | signal → gemini advisory veto (ignored because approval is not required) → risk pass → `execution/skip`: dry run |
+
+No real orders were sent. This confirms the dashboard funnel is fed by the live
+path, including a real quote quarantine on the primary symbol.
+
+### Still open (requires MT5/EA or additional tooling)
+
+* Attach `TradingAgentsEA` to XAUUSD M15 (`InpMode=PAPER`) and run
+  `scripts/ea_live_smoke.py`; the bridge has not had an EA client since
+  2026-11-13.
+* Verify the MT5 `127.0.0.1` WebRequest entry survives a terminal restart, then
+  re-test the handshake/whitelist.
+* Demo live reconciliation and a mid-trade rollback drill need an attached EA
+  and an open position.
+* Total coverage is 62%; `runner.py` (12%) and `main.py` (20%) are exercised
+  mainly by the live/CLI paths and have no integration harness yet. Install
+  `pytest-cov` before repeating the coverage command.

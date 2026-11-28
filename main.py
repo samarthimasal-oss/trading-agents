@@ -8,6 +8,7 @@ Usage:
   python main.py check                 # verify MT5 connectivity + config
   python main.py backtest             # replay history on your symbol
   python main.py run --dry-run        # live pipeline, no real orders
+  python main.py run --dry-run --once # one live cycle, then exit
   python main.py run                  # LIVE trading on MT5 (careful!)
   python main.py status               # account + bot positions + journal
   python main.py strategies --csv x   # five-engine research report
@@ -134,7 +135,8 @@ def llm_key_check(cfg: dict) -> None:
         print(f"      default file: {cfg['llm'].get('api_key_file')}")
 
 
-def cmd_run(cfg: dict, dry_run: bool) -> int:
+def cmd_run(cfg: dict, dry_run: bool, seconds: float = 0.0,
+            once: bool = False) -> int:
     from runner import TradingAgentRunner
     log = logging.getLogger()
     logging.basicConfig(
@@ -149,7 +151,11 @@ def cmd_run(cfg: dict, dry_run: bool) -> int:
         runner.start()
         if dry_run:
             log.info("DRY-RUN: no real orders will be sent.")
-        runner.run_forever()
+        if once:
+            report = runner.cycle()
+            log.info("Single cycle finished: %s", report)
+        else:
+            runner.run_forever(seconds=seconds)
     except Exception as exc:
         log.exception("Fatal: %s", exc)
         return 1
@@ -646,7 +652,9 @@ def main() -> int:
     parser.add_argument("--port", default=None, type=int,
                         help="ea-server: bind port (default 8765)")
     parser.add_argument("--seconds", default=0.0, type=float,
-                        help="ea-server: stop after N seconds (0 = run until Ctrl+C)")
+                        help="run/ea-server: stop after N seconds (0 = until Ctrl+C)")
+    parser.add_argument("--once", action="store_true",
+                        help="run: execute exactly one poll cycle and exit")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO,
@@ -660,7 +668,7 @@ def main() -> int:
     if args.command == "check":
         return cmd_check(cfg)
     if args.command == "run":
-        return cmd_run(cfg, args.dry_run)
+        return cmd_run(cfg, args.dry_run, seconds=args.seconds, once=args.once)
     if args.command == "backtest":
         return cmd_backtest(cfg, args)
     if args.command == "strategies":

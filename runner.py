@@ -709,10 +709,12 @@ class TradingAgentRunner:
             pass
 
     # ------------------------------------------------------------------ loop
-    def run_forever(self):
+    def run_forever(self, seconds: float = 0.0):
         poll = float(self.cfg["trading"].get("poll_seconds") or 15)
-        log.info("Running live loop (%s, new-bar driven, poll=%ss). Ctrl+C to stop.",
-                 "DRY-RUN" if self.dry_run else "LIVE", poll)
+        deadline = time.time() + seconds if seconds > 0 else None
+        log.info("Running live loop (%s, new-bar driven, poll=%ss). %s.",
+                 "DRY-RUN" if self.dry_run else "LIVE", poll,
+                 f"Stopping after {seconds:.0f}s" if deadline else "Ctrl+C to stop")
         notice = 0
         while True:
             try:
@@ -726,7 +728,11 @@ class TradingAgentRunner:
                 elif rep.get("error") and time.time() - notice > 60:
                     log.warning("error: %s", rep["error"])
                     notice = time.time()
-                time.sleep(poll)
+                remaining = deadline - time.time() if deadline is not None else None
+                time.sleep(poll if remaining is None else min(poll, max(0.0, remaining)))
+                if deadline is not None and time.time() >= deadline:
+                    log.info("Bounded run finished (%.0fs).", seconds)
+                    break
             except KeyboardInterrupt:
                 log.info("Interrupted by user")
                 break

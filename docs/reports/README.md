@@ -118,6 +118,24 @@ The same pass also:
 3. Run `terminal64.exe /config:<ini>` with the dates/model above.
 4. Read `%APPDATA%\MetaQuotes\Terminal\Common\Files\TradingAgents\`.
 
+## Release checks (2026-11-28)
+
+- `python -m pytest`: **277 passed**.
+- Coverage: **62% total**; risk/execution modules 67–94%, funnel service 93%.
+  `runner.py` (12%) and `main.py` (20%) remain integration-only.
+- `npm run test:run` (web/): **30 passed**; `npm run build`: **pass**.
+- `python main.py check`: exit 0 on the demo account; XAUUSD, EURUSD, GBPUSD
+  and USDJPY valid.
+- `python main.py run --dry-run --once`: one real cycle, 16 funnel rows, no
+  orders. XAUUSD was quarantined (`spread 262pts > 80pts`), EURUSD had no
+  consensus, and GBPUSD/USDJPY stopped at `execution/skip: dry run`.
+- `scripts\install_ea.ps1 -Compile`: **0 errors, 0 warnings**. The bridge binds
+  and stops cleanly with `ea-server --seconds 10`.
+- `python scripts/audit_secrets.py`: 20 commits, 282 tracked files, 8 logs,
+  **0 credential hits**.
+- Rollback drills cover config backup restore and guardian SQLite restore
+  (`tests/test_rollback.py`, runbook in `../ROLLBACK.md`).
+
 ## Gates still open
 
 - Walk-forward, out-of-sample and holdout validation: **completed and FAILED**
@@ -129,6 +147,6 @@ The same pass also:
   `dry_run` ack, EA-side duplicate rejection, bridge restart/reconnect and
   zero-mismatch reconciliation. Evidence:
   [`phase3_ea_live_smoke_2026-11-11.md`](phase3_ea_live_smoke_2026-11-11.md).
-  Still open: mid-trade kill/recovery drills and the per-restart socket
-  whitelist on terminal build 6316.
+  Still open: mid-trade kill/recovery drills, an EA attach after 2026-11-13,
+  and the per-restart socket whitelist on terminal build 6316.
 - Only after those pass should any engine be considered for live execution.

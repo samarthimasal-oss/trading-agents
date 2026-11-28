@@ -455,8 +455,9 @@ python main.py strategies --csv demo_1min.csv           # five-engine research r
 python main.py walkforward --bars 12000                # folds + holdout + Monte Carlo
 python -m research.backtest --offline --timeframe M15  # causal quant/Kronos replay
 python -m research.measure_upgrade --baseline-ref a88a920  # before/after report
-python main.py run --dry-run               # full live pipeline, NO real orders
-python -m pytest -q                        # regression suite
+python main.py run --dry-run --once        # one real cycle, NO real orders
+python main.py run --dry-run --seconds 60  # bounded loop, NO real orders
+python -m pytest                           # regression suite (277 tests)
 ```
 
 For the native EA, also verify the bridge before attaching it:
@@ -471,6 +472,15 @@ python scripts\ea_live_smoke.py            # PAPER-only; run during session hour
 acks, restarts the bridge and reconciles. Run it during London/overlap/New
 York hours; outside those it prints `SKIP` and exits 2. It refuses to run
 unless the EA reports `mode=PAPER`.
+
+On 2026-11-28 the bounded dry-run wrote 16 funnel rows in one cycle: XAUUSD was
+quarantined for a 262-point spread, EURUSD had no consensus, and GBPUSD/USDJPY
+stopped at `execution/skip: dry run`; no orders were sent. The same pass had
+277 Python tests and 30 frontend tests green, a passing web build, 62% reported
+coverage (risk/execution modules 67–94%), a clean EA compile (0 errors, 0
+warnings), and a clean secret audit (20 commits, 282 tracked files, 8 logs, 0
+hits). The EA has not been attached since 2026-11-13, so handshake/whitelist
+persistence and demo reconciliation remain open.
 
 Then:
 

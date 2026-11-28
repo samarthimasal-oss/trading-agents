@@ -619,16 +619,16 @@ A strategy/config/model change is promoted only if:
 
 #### Release checklist
 
-- [ ] `python main.py check` passes; XAUUSD valid; invalid symbols quarantined.
-- [ ] `pytest` green; coverage reported for critical modules.
+- [x] `python main.py check` passes; XAUUSD valid; invalid symbols quarantined. (2026-11-28: exit 0 on the demo account; all four configured symbols valid. The same day's dry-run rejected XAUUSD with `quote quarantined: spread 262pts > 80pts`, exercising the invalid-quote path.)
+- [x] `pytest` green; coverage reported for critical modules. (277 tests green on 2026-11-28. Coverage: 62% total; `api/services/funnel_service.py` 93%, `api/routers/control.py` 91%, `execution/guardian.py` 84%, `execution/ea_protocol.py` 83%, `execution/ea_client.py` 77%, `execution/executor.py` 67%. `runner.py` 12% and `main.py` 20% remain integration-only.)
 - [x] Backtest report reproducible from a manifest (data hash, config hash, code hash). Reports from `research/backtest.py`, `research/tune.py` and `research/measure_upgrade.py` embed a `manifest` with content hashes, config SHA-256, signal-cache/input hashes, git commit + dirty source-tree hash, costs, split and environment; config values and absolute paths are never written.
-- [ ] Walk-forward and holdout results documented, including failures.
-- [ ] EA compiles clean; Strategy Tester report archived.
-- [ ] Demo dry-run and demo live verified; reconciliation matches.
-- [ ] Dashboard controls verified; live mode gated.
-- [ ] No secrets in git history or logs.
-- [ ] Rollback instructions tested.
-- [ ] README and subsystem docs updated.
+- [x] Walk-forward and holdout results documented, including failures. (Sections 9–10 of the performance report; every holdout gate failed and no setting was applied.)
+- [x] EA compiles clean; Strategy Tester report archived. (2026-11-28 compile: 0 errors, 0 warnings; tester reports and caveats are in `docs/reports/`.)
+- [ ] Demo dry-run and demo live verified; reconciliation matches. (2026-11-28 dry-run: one real cycle, 16 funnel rows, no orders. Demo live/reconciliation still needs an attached EA and an open position.)
+- [x] Dashboard controls verified; live mode gated. (30 frontend tests and the production build pass; `POST /runner/start` rejects live mode with `live_disabled` and `ea.enabled` remains false.)
+- [x] No secrets in git history or logs. (`scripts/audit_secrets.py`: 20 commits, 282 tracked files, 8 logs, 0 hits on 2026-11-28.)
+- [x] Rollback instructions tested. (`docs/ROLLBACK.md`; config backup and guardian SQLite restore are covered by `tests/test_rollback.py`. The MT5 mid-trade drill remains open.)
+- [x] README and subsystem docs updated. (Performance report, roadmap, rollback runbook and README carry the 2026-11-28 evidence.)
 
 ---
 
