@@ -153,7 +153,14 @@ def cmd_run(cfg: dict, dry_run: bool, seconds: float = 0.0,
             log.info("DRY-RUN: no real orders will be sent.")
         if once:
             report = runner.cycle()
-            log.info("Single cycle finished: %s", report)
+            summary = {key: report[key] for key in ("equity", "daily_pnl", "error")
+                       if key in report}
+            summary["symbols"] = {
+                symbol: {field: rec.get(field) for field in
+                         ("action", "why", "price", "spread")}
+                for symbol, rec in report.items() if isinstance(rec, dict)
+            }
+            log.info("Single cycle finished: %s", summary)
         else:
             runner.run_forever(seconds=seconds)
     except Exception as exc:
